@@ -320,6 +320,27 @@ class GitHubApiClient {
         }
     }
 
+    suspend fun getRecentWorkflowRuns(
+        token: String,
+        owner: String,
+        repo: String,
+        perPage: Int = 30
+    ): Result<List<WorkflowRun>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val url = "https://api.github.com/repos/$owner/$repo/actions/runs?per_page=$perPage"
+            val request = baseRequestBuilder(token, url).build()
+            client.newCall(request).execute().use { response ->
+                val body = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    throw IllegalStateException("Erro ao buscar histórico no GitHub (HTTP ${response.code}): $body")
+                }
+                val adapter = moshi.adapter(WorkflowRunsResponse::class.java)
+                val runsResponse = adapter.fromJson(body)
+                runsResponse?.workflowRuns ?: emptyList()
+            }
+        }
+    }
+
     suspend fun getWorkflowRun(
         token: String,
         owner: String,

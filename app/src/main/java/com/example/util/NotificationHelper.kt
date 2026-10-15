@@ -53,6 +53,11 @@ object NotificationHelper {
         }
     }
 
+    fun dismissProgressNotification(context: Context) {
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.cancel(PROGRESS_NOTIFICATION_ID)
+    }
+
     fun showCompletionAlert(
         context: Context,
         isSuccess: Boolean,
@@ -62,6 +67,9 @@ object NotificationHelper {
     ) {
         setupChannels(context)
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        // ALWAYS dismiss the ongoing progress notification immediately!
+        manager.cancel(PROGRESS_NOTIFICATION_ID)
 
         val openAppIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -76,15 +84,15 @@ object NotificationHelper {
         val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
 
         val title = if (isSuccess) {
-            "🎉 APK Compilado com Sucesso!"
+            "🎉 APK Pronto para Instalar!"
         } else {
             "❌ Falha na Compilação"
         }
 
         val contentText = if (isSuccess) {
-            "O APK do projeto '$projectName' está pronto para download."
+            "O APK do aplicativo '$projectName' foi gerado com sucesso."
         } else {
-            "A compilação de '$projectName' falhou. Toque para verificar os logs."
+            "A compilação de '$projectName' não pôde ser concluída."
         }
 
         val builder = NotificationCompat.Builder(context, ALERT_CHANNEL_ID)

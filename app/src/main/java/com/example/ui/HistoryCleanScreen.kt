@@ -22,17 +22,23 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,6 +49,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.db.BuildRecord
+import com.example.ui.theme.AccentCyan
 import com.example.ui.theme.AccentEmerald
 import com.example.ui.theme.AccentRed
 import com.example.ui.theme.TerminalBlack
@@ -52,6 +59,7 @@ import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 import com.example.util.ZipHelper
+import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -62,9 +70,49 @@ fun HistoryCleanScreen(
     onBackClick: () -> Unit,
     onOpenRecord: (BuildRecord) -> Unit,
     onDeleteRecord: (String) -> Unit,
+    onSyncHistory: () -> Unit,
+    onClearAllHistory: () -> Unit,
+    onClearSyncMessage: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     BackHandler { onBackClick() }
+
+    var showClearDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(state.historySyncMessage) {
+        if (state.historySyncMessage != null) {
+            delay(4000)
+            onClearSyncMessage()
+        }
+    }
+
+    if (showClearDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearDialog = false },
+            title = { Text("Limpar Histórico", color = TextPrimary, fontWeight = FontWeight.Bold) },
+            text = { Text("Deseja apagar todos os registros do histórico?", color = TextSecondary) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showClearDialog = false
+                        onClearAllHistory()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentRed)
+                ) {
+                    Text("Limpar Tudo", color = Color.White)
+                }
+            },
+            dismissButton = {
+                Button(
+                    onClick = { showClearDialog = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent, contentColor = TextMuted)
+                ) {
+                    Text("Cancelar")
+                }
+            },
+            containerColor = TerminalCardBg
+        )
+    }
 
     Surface(
         modifier = modifier.fillMaxSize(),
@@ -81,37 +129,114 @@ fun HistoryCleanScreen(
                     .fillMaxWidth()
                     .background(TerminalCardBg)
                     .border(1.dp, TerminalCardBorder)
-                    .padding(horizontal = 8.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(horizontal = 8.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                IconButton(
-                    onClick = onBackClick,
-                    modifier = Modifier.testTag("history_back_button")
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
                 ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Voltar",
-                        tint = TextPrimary
-                    )
+                    IconButton(
+                        onClick = onBackClick,
+                        modifier = Modifier.testTag("history_back_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Voltar",
+                            tint = TextPrimary
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Column {
+                        Text(
+                            text = "Histórico de Compilações",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = if (state.isSyncingHistory) "Sincronizando com GitHub..."
+                            else "${state.historyList.size} compilações registradas",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (state.isSyncingHistory) AccentCyan else TextSecondary,
+                            fontSize = 11.sp
+                        )
+                    }
                 }
-                Spacer(modifier = Modifier.width(6.dp))
-                Column {
-                    Text(
-                        text = "Histórico de Compilações",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary
-                    )
-                    Text(
-                        text = "${state.historyList.size} compilações registradas",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextSecondary,
-                        fontSize = 11.sp
-                    )
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = onSyncHistory,
+                        enabled = !state.isSyncingHistory,
+                        modifier = Modifier.testTag("sync_history_button")
+                    ) {
+                        if (state.isSyncingHistory) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                color = AccentCyan,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Sincronizar com GitHub",
+                                tint = AccentCyan
+                            )
+                        }
+                    }
+
+                    if (state.historyList.isNotEmpty()) {
+                        IconButton(
+                            onClick = { showClearDialog = true },
+                            modifier = Modifier.testTag("clear_all_history_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Delete,
+                                contentDescription = "Limpar histórico",
+                                tint = TextMuted
+                            )
+                        }
+                    }
                 }
             }
 
-            // History List
+            // Sync message banner
+            if (state.historySyncMessage != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFF0F1B2B))
+                        .border(1.dp, AccentCyan.copy(alpha = 0.4f))
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = state.historySyncMessage,
+                            color = AccentCyan,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        IconButton(
+                            onClick = onClearSyncMessage,
+                            modifier = Modifier.size(20.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Error,
+                                contentDescription = "Fechar aviso",
+                                tint = TextMuted,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // History List or Empty State
             if (state.historyList.isEmpty()) {
                 Box(
                     modifier = Modifier
@@ -146,10 +271,40 @@ fun HistoryCleanScreen(
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "As compilações que você realizar serão salvas aqui automaticamente.",
+                            text = "Suas compilações são salvas automaticamente aqui.",
                             style = MaterialTheme.typography.bodySmall,
                             color = TextMuted
                         )
+                        Spacer(modifier = Modifier.height(20.dp))
+
+                        Button(
+                            onClick = onSyncHistory,
+                            enabled = !state.isSyncingHistory,
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = AccentCyan,
+                                contentColor = Color(0xFF04192B)
+                            ),
+                            modifier = Modifier.testTag("empty_state_sync_button")
+                        ) {
+                            if (state.isSyncingHistory) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    color = Color(0xFF04192B),
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Sincronizando...", fontWeight = FontWeight.Bold)
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Buscar Compilações no GitHub", fontWeight = FontWeight.Bold)
+                            }
+                        }
                     }
                 }
             } else {
@@ -180,6 +335,21 @@ private fun HistoryCard(
     onDelete: () -> Unit
 ) {
     val isSuccess = record.status == "SUCCESS"
+    val isInProgress = record.status == "IN_PROGRESS"
+    val isFailure = !isSuccess && !isInProgress
+
+    val statusColor = when {
+        isSuccess -> AccentEmerald
+        isInProgress -> AccentCyan
+        else -> AccentRed
+    }
+
+    val statusLabel = when {
+        isSuccess -> "Sucesso"
+        isInProgress -> "Em andamento..."
+        else -> "Falha"
+    }
+
     val dateFormatted = remember(record.timestamp) {
         SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(record.timestamp))
     }
@@ -197,9 +367,7 @@ private fun HistoryCard(
             .testTag("history_item_${record.id}"),
         colors = CardDefaults.cardColors(containerColor = TerminalCardBg),
         border = CardDefaults.outlinedCardBorder().copy(
-            brush = androidx.compose.ui.graphics.SolidColor(
-                if (isSuccess) AccentEmerald.copy(alpha = 0.35f) else AccentRed.copy(alpha = 0.35f)
-            )
+            brush = androidx.compose.ui.graphics.SolidColor(statusColor.copy(alpha = 0.35f))
         )
     ) {
         Column(
@@ -213,16 +381,24 @@ private fun HistoryCard(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = if (isSuccess) Icons.Default.CheckCircle else Icons.Default.Error,
-                        contentDescription = null,
-                        tint = if (isSuccess) AccentEmerald else AccentRed,
-                        modifier = Modifier.size(20.dp)
-                    )
+                    if (isInProgress) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            color = AccentCyan,
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Icon(
+                            imageVector = if (isSuccess) Icons.Default.CheckCircle else Icons.Default.Error,
+                            contentDescription = null,
+                            tint = statusColor,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = if (isSuccess) "Sucesso" else "Falha",
-                        color = if (isSuccess) AccentEmerald else AccentRed,
+                        text = statusLabel,
+                        color = statusColor,
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.sp
                     )

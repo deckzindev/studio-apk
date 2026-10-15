@@ -51,13 +51,12 @@ fun MainScreen(
                 modifier = modifier
             )
         }
-        AppScreen.LOGS -> {
-            LogsCleanScreen(
+        AppScreen.BUILD_PROGRESS -> {
+            BuildProgressCleanScreen(
                 state = state,
                 onBackClick = viewModel::goToSelectZipScreen,
+                onHistoryClick = viewModel::goToHistoryScreen,
                 onDownloadApkClick = { viewModel.downloadAndOpenApk(context) },
-                onCopyLogsClick = { viewModel.copyLogsToClipboard(context) },
-                onClearLogsCopiedMessage = viewModel::clearLogsCopiedMessage,
                 modifier = modifier
             )
         }
@@ -67,6 +66,9 @@ fun MainScreen(
                 onBackClick = viewModel::goToSelectZipScreen,
                 onOpenRecord = viewModel::openHistoryRecord,
                 onDeleteRecord = viewModel::deleteHistoryRecord,
+                onSyncHistory = { viewModel.syncHistoryFromGitHub(silent = false) },
+                onClearAllHistory = viewModel::clearAllHistory,
+                onClearSyncMessage = viewModel::clearHistorySyncMessage,
                 modifier = modifier
             )
         }

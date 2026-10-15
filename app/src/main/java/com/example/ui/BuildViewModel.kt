@@ -3,14 +3,13 @@ package com.example.ui
 import android.app.Application
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.ArtifactItem
 import com.example.data.GitHubApiClient
 import com.example.data.GitHubUser
 import com.example.data.TokenStorage
-import com.example.data.WorkflowJob
-import com.example.data.WorkflowRun
 import com.example.data.db.AppDatabase
 import com.example.data.db.BuildRecord
 import com.example.data.db.BuildRepository
@@ -23,17 +22,21 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.TimeZone
 import java.util.UUID
 import kotlin.random.Random
 
 enum class AppScreen {
     TOKEN,
     SELECT_ZIP,
-    LOGS,
+    BUILD_PROGRESS,
     HISTORY
 }
 
@@ -41,8 +44,7 @@ enum class BuildPhase {
     IDLE,
     PREPARING,
     UPLOADING,
-    QUEUED,
-    IN_PROGRESS,
+    COMPILING,
     COMPLETED_SUCCESS,
     COMPLETED_FAILURE,
     ERROR
@@ -60,27 +62,20 @@ data class BuildUiState(
     val selectedProject: ProjectAnalysis? = null,
 
     val buildPhase: BuildPhase = BuildPhase.IDLE,
+    val currentStepNumber: Int = 1,
     val buildStatusMessage: String = "",
-    val uploadCurrent: Int = 0,
-    val uploadTotal: Int = 0,
-    val commitSha: String? = null,
-    val workflowRun: WorkflowRun? = null,
-    val jobs: List<WorkflowJob> = emptyList(),
-    val logsText: String = "",
     val elapsedSeconds: Long = 0,
+    val steps: List<SimpleBuildStep> = BuildStepHelper.createSteps(1),
 
-    val stages: List<BuildStageItem> = emptyList(),
-
-    val artifacts: List<ArtifactItem> = emptyList(),
     val validApkArtifact: ArtifactItem? = null,
     val isDownloadingApk: Boolean = false,
     val downloadPercent: Int = 0,
     val downloadedApkFile: File? = null,
-    val generalError: String? = null,
-    val logsCopiedMessage: String? = null,
 
     val historyList: List<BuildRecord> = emptyList(),
-    val activeHistoryRecord: BuildRecord? = null
+    val activeHistoryRecord: BuildRecord? = null,
+    val isSyncingHistory: Boolean = false,
+    val historySyncMessage: String? = null
 )
 
 class BuildViewModel(application: Application) : AndroidViewModel(application) {
@@ -93,16 +88,57 @@ class BuildViewModel(application: Application) : AndroidViewModel(application) {
     private val _uiState = MutableStateFlow(BuildUiState())
     val uiState: StateFlow<BuildUiState> = _uiState.asStateFlow()
 
-    private var buildPollingJob: Job? = null
+    private var currentBuildId: String? = null
+    private var currentBuildStartTime: Long = 0L
+    private var currentProjectName: String = "Projeto Android"
     private var timerJob: Job? = null
-    private val baseLogs = StringBuilder()
-    private var githubExecutionLogs: String = ""
 
     init {
-        // Collect build history
+        // Collect local history safely
         viewModelScope.launch {
-            buildRepository.allBuilds.collect { builds ->
-                _uiState.update { it.copy(historyList = builds) }
+            buildRepository.allBuilds
+                .catch { e -> Log.e("BuildViewModel", "Erro ao carregar histórico: ${e.message}", e) }
+                .collect { builds -> _uiState.update { it.copy(historyList = builds) } }
+        }
+
+        // Listen to background service updates for real-time progress
+        viewModelScope.launch {
+            BuildForegroundService.serviceState.collect { serviceUpdate ->
+                if (serviceUpdate.isRunning) {
+                    val stepNum = serviceUpdate.stepNumber
+                    val phase = when (stepNum) {
+                        1 -> BuildPhase.PREPARING
+                        2 -> BuildPhase.UPLOADING
+                        3 -> BuildPhase.COMPILING
+                        4 -> BuildPhase.COMPLETED_SUCCESS
+                        else -> BuildPhase.COMPILING
+                    }
+                    _uiState.update {
+                        it.copy(
+                            buildPhase = phase,
+                            currentStepNumber = stepNum,
+                            buildStatusMessage = serviceUpdate.statusMessage,
+                            elapsedSeconds = serviceUpdate.elapsedSeconds,
+                            steps = BuildStepHelper.createSteps(stepNum)
+                        )
+                    }
+                } else if (serviceUpdate.isFinished) {
+                    val finalPhase = if (serviceUpdate.isSuccess) BuildPhase.COMPLETED_SUCCESS else BuildPhase.COMPLETED_FAILURE
+                    _uiState.update {
+                        it.copy(
+                            buildPhase = finalPhase,
+                            currentStepNumber = if (serviceUpdate.isSuccess) 4 else 3,
+                            buildStatusMessage = serviceUpdate.statusMessage,
+                            elapsedSeconds = serviceUpdate.elapsedSeconds,
+                            validApkArtifact = serviceUpdate.validApkArtifact ?: it.validApkArtifact,
+                            steps = BuildStepHelper.createSteps(
+                                currentStep = if (serviceUpdate.isSuccess) 4 else 3,
+                                isError = !serviceUpdate.isSuccess,
+                                isCompleted = serviceUpdate.isSuccess
+                            )
+                        )
+                    }
+                }
             }
         }
 
@@ -129,6 +165,8 @@ class BuildViewModel(application: Application) : AndroidViewModel(application) {
                     targetRepo = savedRepo
                 )
             }
+
+            syncHistoryFromGitHub(silent = true)
         } else {
             _uiState.update { it.copy(currentScreen = AppScreen.TOKEN) }
         }
@@ -140,6 +178,15 @@ class BuildViewModel(application: Application) : AndroidViewModel(application) {
 
     fun goToHistoryScreen() {
         _uiState.update { it.copy(currentScreen = AppScreen.HISTORY) }
+        syncHistoryFromGitHub(silent = true)
+    }
+
+    fun goToSelectZipScreen() {
+        _uiState.update { it.copy(currentScreen = AppScreen.SELECT_ZIP) }
+    }
+
+    fun goToTokenScreen() {
+        _uiState.update { it.copy(currentScreen = AppScreen.TOKEN) }
     }
 
     fun openHistoryRecord(record: BuildRecord) {
@@ -152,23 +199,26 @@ class BuildViewModel(application: Application) : AndroidViewModel(application) {
             )
         } else null
 
-        val phase = when (record.status) {
-            "SUCCESS" -> BuildPhase.COMPLETED_SUCCESS
-            "FAILURE" -> BuildPhase.COMPLETED_FAILURE
-            else -> BuildPhase.IN_PROGRESS
+        val isSuccess = record.status == "SUCCESS"
+        val isFailure = record.status == "FAILURE"
+        val phase = when {
+            isSuccess -> BuildPhase.COMPLETED_SUCCESS
+            isFailure -> BuildPhase.COMPLETED_FAILURE
+            else -> BuildPhase.COMPILING
         }
 
-        val stages = StageParser.parseStages(record.logsText, phase)
+        val stepNum = if (isSuccess) 4 else 3
+        val steps = BuildStepHelper.createSteps(stepNum, isError = isFailure, isCompleted = isSuccess)
 
         _uiState.update {
             it.copy(
-                currentScreen = AppScreen.LOGS,
+                currentScreen = AppScreen.BUILD_PROGRESS,
                 buildPhase = phase,
-                buildStatusMessage = if (phase == BuildPhase.COMPLETED_SUCCESS) "Compilação concluída com sucesso!" else "Compilação finalizou com erro",
-                logsText = record.logsText,
+                currentStepNumber = stepNum,
+                steps = steps,
+                buildStatusMessage = if (isSuccess) "Compilação concluída com sucesso!" else "A compilação falhou no servidor.",
                 elapsedSeconds = record.elapsedSeconds,
                 validApkArtifact = artifactItem,
-                stages = stages,
                 activeHistoryRecord = record
             )
         }
@@ -176,7 +226,133 @@ class BuildViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteHistoryRecord(id: String) {
         viewModelScope.launch {
-            buildRepository.deleteBuild(id)
+            try {
+                buildRepository.deleteBuild(id)
+            } catch (e: Exception) {
+                Log.e("BuildViewModel", "Erro ao excluir do histórico", e)
+            }
+        }
+    }
+
+    fun clearAllHistory() {
+        viewModelScope.launch {
+            try {
+                buildRepository.clearHistory()
+                _uiState.update { it.copy(historySyncMessage = "Histórico limpo com sucesso.") }
+            } catch (e: Exception) {
+                Log.e("BuildViewModel", "Erro ao limpar histórico", e)
+            }
+        }
+    }
+
+    fun clearHistorySyncMessage() {
+        _uiState.update { it.copy(historySyncMessage = null) }
+    }
+
+    fun syncHistoryFromGitHub(silent: Boolean = false) {
+        val token = tokenStorage.getToken()
+        val user = _uiState.value.tokenUser ?: (tokenStorage.getUsername()?.let {
+            GitHubUser(login = it, name = tokenStorage.getUserDisplayName(), avatarUrl = tokenStorage.getAvatarUrl())
+        })
+        val repo = _uiState.value.targetRepo.ifBlank { tokenStorage.getTargetRepo() }
+
+        if (token.isNullOrBlank() || user == null || repo.isBlank()) {
+            if (!silent) {
+                _uiState.update { it.copy(historySyncMessage = "Token ou repositório não configurados.") }
+            }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSyncingHistory = true, historySyncMessage = null) }
+            try {
+                val runsResult = gitHubClient.getRecentWorkflowRuns(token, user.login, repo, perPage = 30)
+                val runs = runsResult.getOrThrow()
+
+                var syncedCount = 0
+                for (run in runs) {
+                    val runKey = "run-${run.id}"
+                    val existing = buildRepository.getBuild(runKey)
+
+                    val status = when (run.conclusion) {
+                        "success" -> "SUCCESS"
+                        "failure", "cancelled", "timed_out" -> "FAILURE"
+                        else -> if (run.status == "completed") "FAILURE" else "IN_PROGRESS"
+                    }
+
+                    var artifactItem: ArtifactItem? = null
+                    if (status == "SUCCESS") {
+                        if (existing?.artifactDownloadUrl != null) {
+                            artifactItem = ArtifactItem(
+                                id = existing.artifactId ?: run.id,
+                                name = existing.apkFileName ?: "app-debug.apk",
+                                sizeInBytes = existing.artifactSize ?: 0L,
+                                archiveDownloadUrl = existing.artifactDownloadUrl
+                            )
+                        } else {
+                            val artifactsResult = gitHubClient.getArtifacts(token, user.login, repo, run.id)
+                            val artifacts = artifactsResult.getOrDefault(emptyList())
+                            artifactItem = artifacts.firstOrNull {
+                                it.name.contains("apk", ignoreCase = true) && !it.expired
+                            }
+                        }
+                    }
+
+                    val runTimestamp = parseIsoTimestamp(run.createdAt) ?: (existing?.timestamp ?: System.currentTimeMillis())
+                    val runName = existing?.projectName ?: ("Build #${run.runNumber ?: run.id}")
+
+                    val record = BuildRecord(
+                        id = runKey,
+                        projectName = runName,
+                        repoName = repo,
+                        status = status,
+                        elapsedSeconds = existing?.elapsedSeconds ?: 0L,
+                        timestamp = runTimestamp,
+                        logsText = if (status == "SUCCESS") "Compilação concluída com sucesso." else "Compilação falhou.",
+                        artifactId = artifactItem?.id,
+                        artifactDownloadUrl = artifactItem?.archiveDownloadUrl,
+                        artifactSize = artifactItem?.sizeInBytes,
+                        apkFileName = artifactItem?.name
+                    )
+
+                    buildRepository.saveBuild(record)
+                    syncedCount++
+                }
+
+                _uiState.update {
+                    it.copy(
+                        isSyncingHistory = false,
+                        historySyncMessage = if (!silent) {
+                            if (syncedCount > 0) "Histórico sincronizado ($syncedCount compilações encontradas)."
+                            else "Nenhuma compilação encontrada no GitHub."
+                        } else null
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e("BuildViewModel", "Erro ao sincronizar com GitHub", e)
+                _uiState.update {
+                    it.copy(
+                        isSyncingHistory = false,
+                        historySyncMessage = if (!silent) "Erro ao sincronizar: ${e.localizedMessage}" else null
+                    )
+                }
+            }
+        }
+    }
+
+    private fun parseIsoTimestamp(isoString: String?): Long? {
+        if (isoString.isNullOrBlank()) return null
+        return try {
+            val format = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
+            format.timeZone = TimeZone.getTimeZone("UTC")
+            format.parse(isoString)?.time
+        } catch (_: Exception) {
+            try {
+                val alt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US)
+                alt.parse(isoString.take(19))?.time
+            } catch (_: Exception) {
+                null
+            }
         }
     }
 
@@ -202,7 +378,6 @@ class BuildViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             val user = verifyResult.getOrThrow()
-
             val randomSuffix = Random.nextInt(100000, 999999)
             val randomRepoName = "apk-builder-$randomSuffix"
 
@@ -236,67 +411,61 @@ class BuildViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun goToTokenScreen() {
-        _uiState.update { it.copy(currentScreen = AppScreen.TOKEN) }
-    }
-
-    fun goToSelectZipScreen() {
-        _uiState.update { it.copy(currentScreen = AppScreen.SELECT_ZIP) }
-    }
-
     fun onZipSelected(uri: Uri) {
+        val newBuildId = UUID.randomUUID().toString()
+        currentBuildId = newBuildId
+        currentBuildStartTime = System.currentTimeMillis()
+        currentProjectName = "Projeto Android"
+
         viewModelScope.launch {
-            baseLogs.clear()
-            githubExecutionLogs = ""
-            baseLogs.append(">>> [INÍCIO] Arquivo ZIP selecionado pelo usuário.\n")
-            baseLogs.append(">>> Processando código-fonte do projeto...\n")
-            val initialStages = StageParser.parseStages(baseLogs.toString(), BuildPhase.PREPARING)
+            val initialSteps = BuildStepHelper.createSteps(1)
 
             _uiState.update {
                 it.copy(
                     isReadingZip = true,
-                    currentScreen = AppScreen.LOGS,
+                    currentScreen = AppScreen.BUILD_PROGRESS,
                     buildPhase = BuildPhase.PREPARING,
-                    buildStatusMessage = "Lendo arquivo ZIP...",
-                    logsText = baseLogs.toString(),
-                    stages = initialStages,
+                    currentStepNumber = 1,
+                    buildStatusMessage = "Lendo e verificando arquivo ZIP...",
+                    steps = initialSteps,
                     elapsedSeconds = 0,
-                    workflowRun = null,
-                    jobs = emptyList(),
-                    artifacts = emptyList(),
                     validApkArtifact = null,
                     downloadedApkFile = null,
-                    activeHistoryRecord = null,
-                    logsCopiedMessage = null
+                    activeHistoryRecord = null
                 )
             }
 
             val context = getApplication<Application>()
             BuildForegroundService.startService(
                 context = context,
-                projectName = "Projeto Android",
+                projectName = currentProjectName,
                 stepNumber = 1,
-                statusMessage = "Lendo e preparando arquivos do projeto..."
+                statusMessage = "Lendo arquivos do projeto..."
             )
+
+            // Save initial in-progress record to database
+            saveInitialRecord(newBuildId, currentProjectName)
 
             val result = ZipHelper.readZipFromUri(context, uri)
 
             if (result.isFailure) {
                 val err = result.exceptionOrNull()?.localizedMessage ?: "Falha ao ler o arquivo ZIP."
-                appendLog("[ERRO]: $err")
-                BuildForegroundService.finishService(context, false, "Projeto", "Falha ao ler arquivo ZIP")
+                BuildForegroundService.finishService(context, false, currentProjectName, "Falha ao ler arquivo ZIP")
                 _uiState.update {
                     it.copy(
                         isReadingZip = false,
                         buildPhase = BuildPhase.ERROR,
                         buildStatusMessage = err,
-                        stages = StageParser.parseStages(baseLogs.toString(), BuildPhase.ERROR)
+                        steps = BuildStepHelper.createSteps(1, isError = true)
                     )
                 }
+                updateFinalRecord(newBuildId, "FAILURE", null)
                 return@launch
             }
 
             val project = result.getOrThrow()
+            currentProjectName = project.fileName
+
             _uiState.update {
                 it.copy(
                     isReadingZip = false,
@@ -304,42 +473,8 @@ class BuildViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
 
-            appendLog(">>> Projeto: ${project.fileName} (${ZipHelper.formatBytes(project.fileSizeBytes)}, ${project.totalFilesCount} arquivos)")
-            if (project.isAndroidProject) {
-                appendLog(">>> Estrutura Android detectada (Gradle).")
-            } else {
-                appendLog(">>> Aviso: Arquivo Gradle não encontrado na raiz; tentando compilação...")
-            }
-
+            startTimer()
             startBuild()
-        }
-    }
-
-    private fun startBuild() {
-        val state = _uiState.value
-        val token = tokenStorage.getToken()
-        val user = state.tokenUser
-        val project = state.selectedProject
-        val repoName = state.targetRepo.ifBlank { tokenStorage.getTargetRepo() }
-
-        if (token.isNullOrBlank() || user == null || project == null) {
-            appendLog("[ERRO]: Credenciais ou projeto não disponíveis.")
-            _uiState.update {
-                it.copy(
-                    buildPhase = BuildPhase.ERROR,
-                    buildStatusMessage = "Configuração incompleta."
-                )
-            }
-            return
-        }
-
-        buildPollingJob?.cancel()
-        timerJob?.cancel()
-
-        startTimer()
-
-        viewModelScope.launch {
-            runBuildFlow(token, user.login, repoName, project)
         }
     }
 
@@ -353,309 +488,136 @@ class BuildViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private suspend fun runBuildFlow(
-        token: String,
-        owner: String,
-        repoName: String,
-        project: ProjectAnalysis
-    ) {
-        val context = getApplication<Application>()
-        try {
-            appendLog(">>> Repositório alvo no GitHub: $owner/$repoName")
-            BuildForegroundService.updateStatus(
-                context = context,
-                stepNumber = 2,
-                statusMessage = "Enviando código-fonte para o GitHub..."
-            )
-            _uiState.update {
-                it.copy(
-                    buildPhase = BuildPhase.UPLOADING,
-                    buildStatusMessage = "Enviando código-fonte para o GitHub..."
-                )
-            }
+    private fun startBuild() {
+        val state = _uiState.value
+        val token = tokenStorage.getToken()
+        val user = state.tokenUser
+        val project = state.selectedProject
+        val repoName = state.targetRepo.ifBlank { tokenStorage.getTargetRepo() }
+        val buildId = currentBuildId ?: UUID.randomUUID().toString()
 
-            appendLog(">>> Enviando ${project.totalFilesCount} arquivos via Git Blobs...")
-
-            var lastUploadPercentNotified = -1
-            val uploadResult = gitHubClient.uploadProjectAndTriggerBuild(
-                token = token,
-                owner = owner,
-                repo = repoName,
-                projectFiles = project.files,
-                onProgress = { status, current, total ->
-                    val percent = if (total > 0) ((current * 100) / total) else 0
-                    _uiState.update {
-                        it.copy(
-                            buildStatusMessage = status,
-                            uploadCurrent = current,
-                            uploadTotal = total
-                        )
-                    }
-                    // Optimized notification: update on step changes or every 10%
-                    if (percent != lastUploadPercentNotified && (percent % 10 == 0 || percent == 100)) {
-                        lastUploadPercentNotified = percent
-                        BuildForegroundService.updateStatus(
-                            context = context,
-                            stepNumber = 2,
-                            statusMessage = "Enviando arquivos ($percent%)",
-                            progressPercent = percent
-                        )
-                    }
-                }
-            )
-
-            val commitSha = uploadResult.getOrThrow()
-            appendLog(">>> Commit criado com sucesso: ${commitSha.take(8)}")
-            appendLog(">>> Disparando workflow no GitHub Actions na branch main...")
-
-            BuildForegroundService.updateStatus(
-                context = context,
-                stepNumber = 3,
-                statusMessage = "Alocando máquina virtual na nuvem..."
-            )
-            _uiState.update {
-                it.copy(
-                    commitSha = commitSha,
-                    buildPhase = BuildPhase.QUEUED,
-                    buildStatusMessage = "Aguardando GitHub Actions iniciar o build..."
-                )
-            }
-
-            pollWorkflowAndStreamLogs(token, owner, repoName, commitSha, project)
-
-        } catch (e: Exception) {
-            timerJob?.cancel()
-            val msg = e.localizedMessage ?: "Erro durante o envio ao GitHub."
-            appendLog("\n[FALHA]: $msg")
-            BuildForegroundService.finishService(context, false, project.fileName, "Falha na compilação: $msg")
-            val fullLogs = getCompleteLogs()
+        if (token.isNullOrBlank() || user == null || project == null) {
             _uiState.update {
                 it.copy(
                     buildPhase = BuildPhase.ERROR,
-                    buildStatusMessage = "Falha: $msg",
-                    logsText = fullLogs,
-                    stages = StageParser.parseStages(fullLogs, BuildPhase.ERROR)
+                    buildStatusMessage = "Configuração incompleta.",
+                    steps = BuildStepHelper.createSteps(1, isError = true)
                 )
             }
-            saveHistoryRecord(
-                id = UUID.randomUUID().toString(),
-                projectName = project.fileName,
-                repoName = repoName,
-                status = "FAILURE",
-                elapsed = _uiState.value.elapsedSeconds,
-                logs = fullLogs,
-                artifact = null
-            )
+            updateFinalRecord(buildId, "FAILURE", null)
+            return
         }
-    }
 
-    private fun pollWorkflowAndStreamLogs(
-        token: String,
-        owner: String,
-        repoName: String,
-        commitSha: String,
-        project: ProjectAnalysis
-    ) {
-        val context = getApplication<Application>()
-        buildPollingJob = viewModelScope.launch {
-            var runId: Long? = null
-            var retryCount = 0
-
-            while (isActive && runId == null && retryCount < 30) {
-                delay(2500)
-                val runResult = gitHubClient.findWorkflowRunForCommit(token, owner, repoName, commitSha)
-                val run = runResult.getOrNull()
-                if (run != null) {
-                    runId = run.id
-                    _uiState.update {
-                        it.copy(
-                            workflowRun = run,
-                            buildStatusMessage = "Execução #${run.runNumber ?: run.id} iniciada no GitHub Actions..."
-                        )
-                    }
-                    appendLog(">>> GitHub Actions iniciou o build #${run.runNumber ?: run.id} (Run ID: ${run.id}).")
-                    BuildForegroundService.updateStatus(
-                        context = context,
-                        stepNumber = 3,
-                        statusMessage = "Executando build #${run.runNumber ?: run.id} no GitHub Actions..."
+        viewModelScope.launch {
+            val context = getApplication<Application>()
+            try {
+                // Step 2: Uploading
+                _uiState.update {
+                    it.copy(
+                        buildPhase = BuildPhase.UPLOADING,
+                        currentStepNumber = 2,
+                        buildStatusMessage = "Enviando projeto para a nuvem...",
+                        steps = BuildStepHelper.createSteps(2)
                     )
-                    break
                 }
-                retryCount++
-                appendLog("... aguardando GitHub Actions (${retryCount}/30)")
-            }
+                BuildForegroundService.updateStatus(
+                    context = context,
+                    stepNumber = 2,
+                    statusMessage = "Enviando código para a nuvem..."
+                )
 
-            if (runId == null) {
+                val uploadResult = gitHubClient.uploadProjectAndTriggerBuild(
+                    token = token,
+                    owner = user.login,
+                    repo = repoName,
+                    projectFiles = project.files,
+                    onProgress = { status, current, total ->
+                        val percent = if (total > 0) ((current * 100) / total) else 0
+                        _uiState.update {
+                            it.copy(buildStatusMessage = "Enviando arquivos ($percent%)...")
+                        }
+                    }
+                )
+
+                val commitSha = uploadResult.getOrThrow()
+
+                // Step 3: Compiling in cloud - Hand off to independent background service!
+                _uiState.update {
+                    it.copy(
+                        buildPhase = BuildPhase.COMPILING,
+                        currentStepNumber = 3,
+                        buildStatusMessage = "Compilando aplicativo no servidor...",
+                        steps = BuildStepHelper.createSteps(3)
+                    )
+                }
+
+                // Delegate polling directly to the Foreground Service so it NEVER stops when app is minimized!
+                BuildForegroundService.startPolling(
+                    context = context,
+                    token = token,
+                    owner = user.login,
+                    repo = repoName,
+                    commitSha = commitSha,
+                    projectName = project.fileName,
+                    buildId = buildId,
+                    startTime = currentBuildStartTime
+                )
+
+            } catch (e: Exception) {
                 timerJob?.cancel()
-                appendLog("\n[ERRO]: Tempo limite excedido aguardando o GitHub Actions.")
-                BuildForegroundService.finishService(context, false, project.fileName, "Tempo limite excedido")
-                val fullLogs = getCompleteLogs()
+                val msg = e.localizedMessage ?: "Erro ao enviar o projeto para o GitHub."
+                BuildForegroundService.finishService(context, false, project.fileName, "Falha na preparação: $msg")
                 _uiState.update {
                     it.copy(
                         buildPhase = BuildPhase.ERROR,
-                        buildStatusMessage = "Tempo limite excedido.",
-                        logsText = fullLogs,
-                        stages = StageParser.parseStages(fullLogs, BuildPhase.ERROR)
+                        buildStatusMessage = msg,
+                        steps = BuildStepHelper.createSteps(2, isError = true)
                     )
                 }
-                return@launch
-            }
-
-            var completed = false
-            var activeJobId: Long? = null
-
-            while (isActive && !completed) {
-                delay(3000)
-
-                val runResult = gitHubClient.getWorkflowRun(token, owner, repoName, runId)
-                val currentRun = runResult.getOrNull() ?: continue
-                _uiState.update { it.copy(workflowRun = currentRun) }
-
-                val jobsResult = gitHubClient.getWorkflowJobs(token, owner, repoName, runId)
-                val jobs = jobsResult.getOrDefault(emptyList())
-                if (jobs.isNotEmpty()) {
-                    _uiState.update { it.copy(jobs = jobs) }
-                    activeJobId = jobs.firstOrNull()?.id ?: activeJobId
-                }
-
-                val status = currentRun.status?.lowercase()
-                val conclusion = currentRun.conclusion?.lowercase()
-
-                var fetchedLiveLogs = false
-                if (activeJobId != null) {
-                    val logsResult = gitHubClient.getJobLogs(token, owner, repoName, activeJobId)
-                    val rawLogs = logsResult.getOrNull()
-                    if (!rawLogs.isNullOrBlank()) {
-                        fetchedLiveLogs = true
-                        githubExecutionLogs = cleanAnsiCodes(rawLogs)
-                    }
-                }
-
-                if (!fetchedLiveLogs && jobs.isNotEmpty()) {
-                    githubExecutionLogs = buildLiveStepsLog(currentRun, jobs)
-                }
-
-                val fullCurrentLogs = getCompleteLogs()
-                val parsedStages = StageParser.parseStages(fullCurrentLogs, BuildPhase.IN_PROGRESS)
-                val currentStepNumber = StageParser.getCurrentStepNumber(parsedStages)
-
-                val stepStatusText = when (currentStepNumber) {
-                    3 -> "Alocando máquina virtual na nuvem..."
-                    4 -> "Configurando Java JDK 17 e Gradle..."
-                    5 -> "Compilando APK no Gradle..."
-                    6 -> "Finalizando e empacotando APK..."
-                    else -> "Compilando no GitHub Actions..."
-                }
-
-                if (status == "in_progress") {
-                    BuildForegroundService.updateStatus(
-                        context = context,
-                        stepNumber = currentStepNumber,
-                        statusMessage = stepStatusText
-                    )
-                    _uiState.update {
-                        it.copy(
-                            buildPhase = BuildPhase.IN_PROGRESS,
-                            buildStatusMessage = stepStatusText,
-                            logsText = fullCurrentLogs,
-                            stages = parsedStages
-                        )
-                    }
-                }
-
-                if (status == "completed") {
-                    completed = true
-                    timerJob?.cancel()
-
-                    if (activeJobId != null) {
-                        var finalLogs: String? = null
-                        for (attempt in 1..8) {
-                            val finalLogsResult = gitHubClient.getJobLogs(token, owner, repoName, activeJobId)
-                            finalLogs = finalLogsResult.getOrNull()
-                            if (!finalLogs.isNullOrBlank()) break
-                            delay(1500)
-                        }
-                        if (!finalLogs.isNullOrBlank()) {
-                            githubExecutionLogs = cleanAnsiCodes(finalLogs)
-                        } else {
-                            githubExecutionLogs = buildLiveStepsLog(currentRun, jobs)
-                        }
-                    }
-
-                    appendLog("\n>>> Verificando artefato APK gerado...")
-                    val artifactsResult = gitHubClient.getArtifacts(token, owner, repoName, runId)
-                    val artifacts = artifactsResult.getOrDefault(emptyList())
-                    val apkArtifact = artifacts.firstOrNull {
-                        it.name.contains("apk", ignoreCase = true) && !it.expired
-                    }
-
-                    val finalPhase = if (conclusion == "success") BuildPhase.COMPLETED_SUCCESS else BuildPhase.COMPLETED_FAILURE
-                    val finalMessage = if (conclusion == "success") "Compilação concluída com sucesso!" else "Compilação falhou ($conclusion)."
-
-                    if (conclusion == "success") {
-                        appendLog("\n[SUCESSO] Compilação concluída com sucesso!")
-                        if (apkArtifact != null) {
-                            appendLog(">>> APK disponível: ${apkArtifact.name} (${ZipHelper.formatBytes(apkArtifact.sizeInBytes)})")
-                        }
-                        BuildForegroundService.finishService(context, true, project.fileName, "APK gerado com sucesso!")
-                    } else {
-                        appendLog("\n[FALHA NA COMPILAÇÃO] Conclusão: $conclusion")
-                        BuildForegroundService.finishService(context, false, project.fileName, "Compilação finalizou com erro")
-                    }
-
-                    val finalFullLogs = getCompleteLogs()
-                    val finalStages = StageParser.parseStages(finalFullLogs, finalPhase)
-
-                    _uiState.update {
-                        it.copy(
-                            buildPhase = finalPhase,
-                            buildStatusMessage = finalMessage,
-                            artifacts = artifacts,
-                            validApkArtifact = apkArtifact,
-                            stages = finalStages,
-                            logsText = finalFullLogs
-                        )
-                    }
-
-                    // Save complete logs to Room history
-                    saveHistoryRecord(
-                        id = commitSha,
-                        projectName = project.fileName,
-                        repoName = repoName,
-                        status = if (conclusion == "success") "SUCCESS" else "FAILURE",
-                        elapsed = _uiState.value.elapsedSeconds,
-                        logs = finalFullLogs,
-                        artifact = apkArtifact
-                    )
-                }
+                updateFinalRecord(buildId, "FAILURE", null)
             }
         }
     }
 
-    private fun saveHistoryRecord(
-        id: String,
-        projectName: String,
-        repoName: String,
-        status: String,
-        elapsed: Long,
-        logs: String,
-        artifact: ArtifactItem?
-    ) {
+    private fun saveInitialRecord(buildId: String, projectName: String) {
         viewModelScope.launch {
-            val record = BuildRecord(
-                id = id,
-                projectName = projectName,
-                repoName = repoName,
-                status = status,
-                elapsedSeconds = elapsed,
-                timestamp = System.currentTimeMillis(),
-                logsText = logs,
-                artifactId = artifact?.id,
-                artifactDownloadUrl = artifact?.archiveDownloadUrl,
-                artifactSize = artifact?.sizeInBytes,
-                apkFileName = artifact?.name
-            )
-            buildRepository.saveBuild(record)
+            try {
+                val record = BuildRecord(
+                    id = buildId,
+                    projectName = projectName,
+                    repoName = _uiState.value.targetRepo.ifBlank { tokenStorage.getTargetRepo() },
+                    status = "IN_PROGRESS",
+                    elapsedSeconds = 0L,
+                    timestamp = System.currentTimeMillis(),
+                    logsText = "Compilação em andamento..."
+                )
+                buildRepository.saveBuild(record)
+            } catch (e: Exception) {
+                Log.e("BuildViewModel", "Erro ao salvar registro inicial", e)
+            }
+        }
+    }
+
+    private fun updateFinalRecord(buildId: String, status: String, artifact: ArtifactItem?) {
+        viewModelScope.launch {
+            try {
+                val record = BuildRecord(
+                    id = buildId,
+                    projectName = currentProjectName,
+                    repoName = _uiState.value.targetRepo.ifBlank { tokenStorage.getTargetRepo() },
+                    status = status,
+                    elapsedSeconds = _uiState.value.elapsedSeconds,
+                    timestamp = if (currentBuildStartTime > 0L) currentBuildStartTime else System.currentTimeMillis(),
+                    logsText = if (status == "SUCCESS") "Compilação concluída com sucesso." else "Compilação finalizou com erro.",
+                    artifactId = artifact?.id,
+                    artifactDownloadUrl = artifact?.archiveDownloadUrl,
+                    artifactSize = artifact?.sizeInBytes,
+                    apkFileName = artifact?.name
+                )
+                buildRepository.saveBuild(record)
+            } catch (e: Exception) {
+                Log.e("BuildViewModel", "Erro ao atualizar registro final", e)
+            }
         }
     }
 
@@ -695,123 +657,17 @@ class BuildViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     ApkHelper.installApk(context, apkFile)
                 } else {
-                    throw IllegalStateException("Nenhum arquivo .apk encontrado no arquivo baixado.")
+                    throw IllegalStateException("Nenhum arquivo .apk encontrado no artefato.")
                 }
             } catch (e: Exception) {
                 _uiState.update { it.copy(isDownloadingApk = false) }
-                appendLog("\n[ERRO AO BAIXAR APK]: ${e.localizedMessage}")
+                Log.e("BuildViewModel", "Erro ao baixar APK", e)
             }
         }
-    }
-
-    fun getCompleteLogs(): String {
-        // If viewing history, return the record's logsText directly
-        val historyRecord = _uiState.value.activeHistoryRecord
-        if (historyRecord != null && historyRecord.logsText.isNotBlank()) {
-            return historyRecord.logsText
-        }
-
-        val sb = StringBuilder()
-        sb.append("================================================================\n")
-        sb.append("             GITBUILDER - LOGS COMPLETOS DE COMPILAÇÃO          \n")
-        sb.append("================================================================\n\n")
-
-        sb.append(">>> ETAPA 1: INICIALIZAÇÃO LOCAL E ENVIO DO PROJETO\n")
-        sb.append(baseLogs.toString().trim())
-        sb.append("\n\n")
-
-        val ghLogs = githubExecutionLogs.trim()
-        if (ghLogs.isNotEmpty()) {
-            sb.append("================================================================\n")
-            sb.append(">>> ETAPA 2: EXECUÇÃO COMPLETA NO GITHUB ACTIONS (RUNNER UBUNTU)\n")
-            sb.append("================================================================\n\n")
-            sb.append(ghLogs)
-            sb.append("\n\n")
-        }
-
-        val phase = _uiState.value.buildPhase
-        val statusMsg = _uiState.value.buildStatusMessage
-        val artifact = _uiState.value.validApkArtifact
-        val elapsed = _uiState.value.elapsedSeconds
-        val min = elapsed / 60
-        val sec = elapsed % 60
-
-        sb.append("================================================================\n")
-        sb.append(">>> ETAPA 3: RESUMO E CONCLUSÃO\n")
-        sb.append("Status: $statusMsg\n")
-        sb.append(String.format(java.util.Locale.US, "Tempo Total: %02d:%02d\n", min, sec))
-        if (artifact != null) {
-            sb.append("APK Gerado: ${artifact.name} (${ZipHelper.formatBytes(artifact.sizeInBytes)})\n")
-        }
-        sb.append("================================================================\n")
-        return sb.toString()
-    }
-
-    fun copyLogsToClipboard(context: Context) {
-        val fullLogs = getCompleteLogs()
-        ApkHelper.copyToClipboard(context, fullLogs)
-        _uiState.update { it.copy(logsCopiedMessage = "Logs completos copiados com sucesso!") }
-    }
-
-    fun clearLogsCopiedMessage() {
-        _uiState.update { it.copy(logsCopiedMessage = null) }
-    }
-
-    private fun appendLog(line: String) {
-        baseLogs.append(line).append("\n")
-        val full = getCompleteLogs()
-        _uiState.update {
-            it.copy(
-                logsText = full,
-                stages = StageParser.parseStages(full, it.buildPhase)
-            )
-        }
-    }
-
-    private fun buildLiveStepsLog(
-        currentRun: WorkflowRun?,
-        jobs: List<WorkflowJob>
-    ): String {
-        val sb = StringBuilder()
-        val runNum = currentRun?.runNumber ?: currentRun?.id ?: 0
-        val runStatus = currentRun?.status ?: "in_progress"
-        sb.append(">>> GITHUB ACTIONS: Execução #$runNum (Status: $runStatus)\n")
-
-        val firstJob = jobs.firstOrNull()
-        if (firstJob != null) {
-            sb.append(">>> Runner: Ubuntu 24.04 (GitHub Cloud) • Job: ${firstJob.name}\n\n")
-            if (firstJob.steps.isNotEmpty()) {
-                sb.append(">>> ETAPAS DA COMPILAÇÃO:\n")
-                firstJob.steps.forEach { step ->
-                    val icon = when (step.conclusion) {
-                        "success" -> "[✓]"
-                        "failure" -> "[✗]"
-                        "skipped" -> "[-]"
-                        else -> if (step.status == "in_progress") "[▶]" else "[ ]"
-                    }
-                    val statusText = when {
-                        step.conclusion != null -> step.conclusion
-                        step.status == "in_progress" -> "executando..."
-                        else -> "aguardando"
-                    }
-                    sb.append(String.format(java.util.Locale.US, "  %-3s %-32s (%s)\n", icon, step.name, statusText))
-                }
-            } else {
-                sb.append(">>> Inicializando ambiente de compilação...\n")
-            }
-        } else {
-            sb.append(">>> Alocando máquina virtual runner no GitHub Actions...\n")
-        }
-        return sb.toString()
-    }
-
-    private fun cleanAnsiCodes(rawText: String): String {
-        return rawText.replace(Regex("\u001B\\[[;\\d]*[ -/]*[@-~]"), "")
     }
 
     override fun onCleared() {
         super.onCleared()
-        buildPollingJob?.cancel()
         timerJob?.cancel()
     }
 }

@@ -6,11 +6,9 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -21,19 +19,18 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -44,9 +41,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -63,7 +58,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.theme.AccentAmber
 import com.example.ui.theme.AccentCyan
 import com.example.ui.theme.AccentEmerald
 import com.example.ui.theme.AccentRed
@@ -74,10 +68,10 @@ import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 import com.example.util.ZipHelper
-import kotlinx.coroutines.delay
+import java.util.Locale
 
 /**
- * Screen 1: Clean screen with ONLY GitHub Token input and Save button.
+ * Screen 1: Token Configuration Screen (Clean & minimal)
  */
 @Composable
 fun TokenCleanScreen(
@@ -132,7 +126,7 @@ fun TokenCleanScreen(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    text = "Insira seu Personal Access Token (escopo 'repo')",
+                    text = "Insira seu Personal Access Token com escopo 'repo'",
                     style = MaterialTheme.typography.bodyMedium,
                     color = TextSecondary
                 )
@@ -203,7 +197,7 @@ fun TokenCleanScreen(
                             strokeWidth = 2.5.dp
                         )
                         Spacer(modifier = Modifier.width(10.dp))
-                        Text("Criando repositório...", fontWeight = FontWeight.Bold)
+                        Text("Configurando repositório...", fontWeight = FontWeight.Bold)
                     } else {
                         Text("Salvar Token", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                     }
@@ -214,7 +208,7 @@ fun TokenCleanScreen(
 }
 
 /**
- * Screen 2: Clean screen with ONE primary button to select ZIP, plus History button in header.
+ * Screen 2: Select ZIP Screen (Direct & simple)
  */
 @Composable
 fun SelectZipCleanScreen(
@@ -233,7 +227,7 @@ fun SelectZipCleanScreen(
                 .fillMaxSize()
                 .statusBarsPadding()
         ) {
-            // Minimal Header with History button
+            // Header with History button
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -322,14 +316,14 @@ fun SelectZipCleanScreen(
                     Spacer(modifier = Modifier.height(16.dp))
 
                     Text(
-                        text = "A compilação roda em segundo plano mesmo se sair do app.",
+                        text = "A compilação roda em segundo plano mesmo com o app fechado.",
                         style = MaterialTheme.typography.bodySmall,
                         color = TextMuted
                     )
                 }
             }
 
-            // Bottom subtle metadata & option to change token
+            // Bottom metadata & change token
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -363,43 +357,29 @@ fun SelectZipCleanScreen(
 }
 
 /**
- * Screen 3: Compilation screen showing ONLY clean, organized stages.
- * The raw logs toggle button has been removed.
- * At the bottom, a prominent button copies the complete logs from the very start to finish.
+ * Screen 3: Ultra-Clean Build Progress Screen.
+ * Displays only the current stage in a friendly, minimalist layout.
+ * No lines, no logs, zero technical noise.
  */
 @Composable
-fun LogsCleanScreen(
+fun BuildProgressCleanScreen(
     state: BuildUiState,
     onBackClick: () -> Unit,
+    onHistoryClick: () -> Unit,
     onDownloadApkClick: () -> Unit,
-    onCopyLogsClick: () -> Unit,
-    onClearLogsCopiedMessage: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     BackHandler { onBackClick() }
 
-    val expandedStages = remember { mutableStateMapOf<String, Boolean>() }
+    val isSuccess = state.buildPhase == BuildPhase.COMPLETED_SUCCESS
+    val isFailure = state.buildPhase == BuildPhase.COMPLETED_FAILURE || state.buildPhase == BuildPhase.ERROR
+    val isFinished = isSuccess || isFailure
 
-    // Auto-expand stage currently in progress
-    LaunchedEffect(state.stages) {
-        state.stages.forEach { stage ->
-            if (stage.status == StageStatus.IN_PROGRESS) {
-                expandedStages[stage.key] = true
-            }
-        }
+    val timeFormatted = remember(state.elapsedSeconds) {
+        val min = state.elapsedSeconds / 60
+        val sec = state.elapsedSeconds % 60
+        String.format(Locale.US, "%02d:%02d", min, sec)
     }
-
-    // Auto-dismiss copied confirmation message after 3 seconds
-    LaunchedEffect(state.logsCopiedMessage) {
-        if (state.logsCopiedMessage != null) {
-            delay(3000)
-            onClearLogsCopiedMessage()
-        }
-    }
-
-    val isFinished = state.buildPhase == BuildPhase.COMPLETED_SUCCESS ||
-            state.buildPhase == BuildPhase.COMPLETED_FAILURE ||
-            state.buildPhase == BuildPhase.ERROR
 
     Surface(
         modifier = modifier.fillMaxSize(),
@@ -410,7 +390,7 @@ fun LogsCleanScreen(
                 .fillMaxSize()
                 .statusBarsPadding()
         ) {
-            // Header
+            // Clean Minimal Top Bar
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -434,20 +414,23 @@ fun LogsCleanScreen(
                             tint = TextPrimary
                         )
                     }
-                    Spacer(modifier = Modifier.width(4.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
                     Column {
                         Text(
-                            text = "Compilação Android",
+                            text = state.selectedProject?.fileName ?: state.activeHistoryRecord?.projectName ?: "Compilação Android",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
-                            color = TextPrimary
+                            color = TextPrimary,
+                            maxLines = 1
                         )
                         Text(
-                            text = state.buildStatusMessage.ifEmpty { "Compilando..." },
+                            text = if (isSuccess) "Concluído com sucesso"
+                            else if (isFailure) "Falha na compilação"
+                            else "Etapa ${state.currentStepNumber.coerceIn(1, 3)} de 3 • $timeFormatted",
                             style = MaterialTheme.typography.bodySmall,
-                            color = when (state.buildPhase) {
-                                BuildPhase.COMPLETED_SUCCESS -> AccentEmerald
-                                BuildPhase.COMPLETED_FAILURE, BuildPhase.ERROR -> AccentRed
+                            color = when {
+                                isSuccess -> AccentEmerald
+                                isFailure -> AccentRed
                                 else -> AccentCyan
                             },
                             fontWeight = FontWeight.SemiBold
@@ -455,109 +438,274 @@ fun LogsCleanScreen(
                     }
                 }
 
-                // Header quick copy logs button
                 IconButton(
-                    onClick = onCopyLogsClick,
-                    modifier = Modifier.testTag("copy_logs_header_button")
+                    onClick = onHistoryClick,
+                    modifier = Modifier.testTag("progress_history_button")
                 ) {
                     Icon(
-                        imageVector = Icons.Default.ContentCopy,
-                        contentDescription = "Copiar logs completos",
-                        tint = TextSecondary
+                        imageVector = Icons.Default.History,
+                        contentDescription = "Ver Histórico",
+                        tint = AccentCyan
                     )
                 }
             }
 
-            // Progress bar
-            if (!isFinished) {
-                LinearProgressIndicator(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(3.dp),
-                    color = AccentCyan,
-                    trackColor = TerminalCardBorder
+            // Top Stage Pills: 1. Preparação • 2. Envio • 3. Compilação (No connecting lines!)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                StagePill(
+                    stepNumber = 1,
+                    label = "Preparação",
+                    currentStep = state.currentStepNumber,
+                    isSuccess = isSuccess,
+                    isFailure = isFailure && state.currentStepNumber == 1,
+                    modifier = Modifier.weight(1f)
+                )
+                StagePill(
+                    stepNumber = 2,
+                    label = "Envio",
+                    currentStep = state.currentStepNumber,
+                    isSuccess = isSuccess,
+                    isFailure = isFailure && state.currentStepNumber == 2,
+                    modifier = Modifier.weight(1f)
+                )
+                StagePill(
+                    stepNumber = 3,
+                    label = "Compilação",
+                    currentStep = state.currentStepNumber,
+                    isSuccess = isSuccess,
+                    isFailure = isFailure && state.currentStepNumber >= 3,
+                    modifier = Modifier.weight(1f)
                 )
             }
 
-            // Main Body: ONLY ORGANIZED STAGES (No raw logs switch)
+            // Main Content Area: Large, Clean, Direct Stage Indicator
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .background(TerminalBlack)
+                    .padding(horizontal = 24.dp),
+                contentAlignment = Alignment.Center
             ) {
-                if (state.stages.isEmpty()) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            CircularProgressIndicator(color = AccentCyan, strokeWidth = 3.dp)
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Text(
-                                text = "Iniciando compilação no GitHub Actions...",
-                                color = TextSecondary,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                        }
-                    }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .testTag("stages_list"),
-                        contentPadding = PaddingValues(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        items(state.stages, key = { it.key }) { stage ->
-                            val isExpanded = expandedStages[stage.key] ?: (stage.status == StageStatus.IN_PROGRESS)
-                            StageCard(
-                                stage = stage,
-                                isExpanded = isExpanded,
-                                onToggleExpand = {
-                                    expandedStages[stage.key] = !isExpanded
-                                }
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Subtle toast/card when logs are copied
-            AnimatedVisibility(
-                visible = state.logsCopiedMessage != null,
-                enter = fadeIn(),
-                exit = fadeOut()
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color(0xFF0C2417))
-                        .border(1.dp, AccentEmerald.copy(alpha = 0.5f))
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    contentAlignment = Alignment.Center
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.CheckCircle,
-                            contentDescription = null,
-                            tint = AccentEmerald,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
+                    if (isSuccess) {
+                        // Success View
+                        Box(
+                            modifier = Modifier
+                                .size(96.dp)
+                                .clip(CircleShape)
+                                .background(AccentEmerald.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = AccentEmerald,
+                                modifier = Modifier.size(56.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(20.dp))
+
                         Text(
-                            text = state.logsCopiedMessage ?: "",
-                            color = AccentEmerald,
+                            text = "APK Pronto!",
+                            style = MaterialTheme.typography.headlineMedium,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp
+                            color = TextPrimary
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Text(
+                            text = "Seu aplicativo foi gerado com sucesso.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TextSecondary
+                        )
+
+                        Spacer(modifier = Modifier.height(20.dp))
+
+                        // Clean Summary Pill
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(Color(0xFF131D28))
+                                .border(1.dp, AccentEmerald.copy(alpha = 0.4f), RoundedCornerShape(20.dp))
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Schedule,
+                                contentDescription = null,
+                                tint = AccentEmerald,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Tempo total: $timeFormatted",
+                                color = TextPrimary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            if (state.validApkArtifact != null && state.validApkArtifact.sizeInBytes > 0) {
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text("•", color = TextMuted)
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    text = ZipHelper.formatBytes(state.validApkArtifact.sizeInBytes),
+                                    color = AccentEmerald,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                    } else if (isFailure) {
+                        // Failure View
+                        Box(
+                            modifier = Modifier
+                                .size(90.dp)
+                                .clip(CircleShape)
+                                .background(AccentRed.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Error,
+                                contentDescription = null,
+                                tint = AccentRed,
+                                modifier = Modifier.size(50.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(20.dp))
+
+                        Text(
+                            text = "Falha na Compilação",
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Text(
+                            text = "O servidor não pôde concluir a geração do APK.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TextSecondary,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+
+                    } else {
+                        // Active Clean Stage View
+                        val activeStepNumber = state.currentStepNumber.coerceIn(1, 3)
+
+                        Box(
+                            modifier = Modifier
+                                .size(110.dp)
+                                .clip(CircleShape)
+                                .background(AccentCyan.copy(alpha = 0.12f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(90.dp),
+                                color = AccentCyan,
+                                strokeWidth = 4.dp
+                            )
+                            when (activeStepNumber) {
+                                1 -> Icon(
+                                    imageVector = Icons.Default.FolderZip,
+                                    contentDescription = null,
+                                    tint = AccentCyan,
+                                    modifier = Modifier.size(38.dp)
+                                )
+                                2 -> Icon(
+                                    imageVector = Icons.Default.CloudUpload,
+                                    contentDescription = null,
+                                    tint = AccentCyan,
+                                    modifier = Modifier.size(38.dp)
+                                )
+                                else -> Icon(
+                                    imageVector = Icons.Default.Android,
+                                    contentDescription = null,
+                                    tint = AccentCyan,
+                                    modifier = Modifier.size(38.dp)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(24.dp))
+
+                        Text(
+                            text = when (activeStepNumber) {
+                                1 -> "Preparando Projeto"
+                                2 -> "Enviando para a Nuvem"
+                                else -> "Compilando Aplicativo"
+                            },
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Text(
+                            text = state.buildStatusMessage.ifBlank {
+                                when (activeStepNumber) {
+                                    1 -> "Lendo arquivos do aplicativo..."
+                                    2 -> "Transferindo código para o servidor..."
+                                    else -> "O GitHub Actions está gerando o APK..."
+                                }
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TextSecondary,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+
+                        Spacer(modifier = Modifier.height(18.dp))
+
+                        // Elapsed Time Badge
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Color(0xFF131D28))
+                                .padding(horizontal = 14.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Schedule,
+                                contentDescription = null,
+                                tint = AccentCyan,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Tempo: $timeFormatted",
+                                color = AccentCyan,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(18.dp))
+
+                        Text(
+                            text = "A compilação continua na barra de notificações se você fechar o app.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextMuted,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
                     }
                 }
             }
 
-            HorizontalDivider(color = TerminalCardBorder, thickness = 1.dp)
-
-            // Bottom Action Area
+            // Bottom Actions: Direct, Clean Buttons
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -565,22 +713,21 @@ fun LogsCleanScreen(
                     .navigationBarsPadding()
                     .padding(16.dp)
             ) {
-                // If finished and APK available: Download APK Button
-                if (isFinished && state.validApkArtifact != null) {
+                if (isSuccess && state.validApkArtifact != null) {
                     val artifact = state.validApkArtifact
                     val sizeFormatted = ZipHelper.formatBytes(artifact.sizeInBytes)
 
                     Button(
                         onClick = onDownloadApkClick,
                         enabled = !state.isDownloadingApk,
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(14.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = AccentEmerald,
                             contentColor = Color(0xFF042114)
                         ),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(52.dp)
+                            .height(56.dp)
                             .testTag("download_apk_button")
                     ) {
                         if (state.isDownloadingApk) {
@@ -591,18 +738,19 @@ fun LogsCleanScreen(
                             )
                             Spacer(modifier = Modifier.width(10.dp))
                             Text(
-                                text = if (state.downloadPercent > 0) "Baixando APK (${state.downloadPercent}%)..." else "Baixando...",
-                                fontWeight = FontWeight.Bold
+                                text = if (state.downloadPercent > 0) "Baixando (${state.downloadPercent}%)..." else "Baixando...",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp
                             )
                         } else {
                             Icon(
-                                imageVector = if (state.downloadedApkFile != null) Icons.Default.Android else Icons.Default.Download,
+                                imageVector = Icons.Default.Android,
                                 contentDescription = null,
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(24.dp)
                             )
                             Spacer(modifier = Modifier.width(10.dp))
                             Text(
-                                text = if (state.downloadedApkFile != null) "Instalar APK" else "Baixar APK ($sizeFormatted)",
+                                text = if (state.downloadedApkFile != null) "Instalar Aplicativo" else "Instalar Aplicativo ($sizeFormatted)",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 16.sp
                             )
@@ -611,52 +759,54 @@ fun LogsCleanScreen(
                     Spacer(modifier = Modifier.height(10.dp))
                 }
 
-                // Button: Copy Complete Logs from start to end (Always visible and prominent!)
-                Button(
-                    onClick = onCopyLogsClick,
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (state.validApkArtifact == null) AccentCyan else Color(0xFF212836),
-                        contentColor = if (state.validApkArtifact == null) Color(0xFF04192B) else TextPrimary
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(50.dp)
-                        .testTag("copy_complete_logs_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.ContentCopy,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Copiar Logs Completos (Início ao Fim)",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
-                    )
-                }
-
                 if (isFinished) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    TextButton(
-                        onClick = onBackClick,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("new_project_button")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = null,
-                            tint = TextMuted,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Selecionar Outro Arquivo",
-                            color = TextMuted,
-                            fontSize = 13.sp
-                        )
+                        Button(
+                            onClick = onHistoryClick,
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF1E2838),
+                                contentColor = TextPrimary
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp)
+                                .testTag("view_history_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.History,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = AccentCyan
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Ver Histórico", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        }
+
+                        Button(
+                            onClick = onBackClick,
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF1E2838),
+                                contentColor = TextPrimary
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp)
+                                .testTag("new_project_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = TextMuted
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(if (isSuccess) "Novo App" else "Tentar Outro", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        }
                     }
                 }
             }
@@ -665,128 +815,85 @@ fun LogsCleanScreen(
 }
 
 /**
- * Clean Stage Card that organizes logs by step.
+ * Clean Stage Pill (No lines, simple visual indicator)
  */
 @Composable
-private fun StageCard(
-    stage: BuildStageItem,
-    isExpanded: Boolean,
-    onToggleExpand: () -> Unit
+private fun StagePill(
+    stepNumber: Int,
+    label: String,
+    currentStep: Int,
+    isSuccess: Boolean,
+    isFailure: Boolean,
+    modifier: Modifier = Modifier
 ) {
-    val (statusIcon, statusColor, statusLabel) = when (stage.status) {
-        StageStatus.SUCCESS -> Triple(Icons.Default.CheckCircle, AccentEmerald, "Concluído")
-        StageStatus.IN_PROGRESS -> Triple(Icons.Default.HourglassEmpty, AccentCyan, "Em andamento...")
-        StageStatus.FAILURE -> Triple(Icons.Default.Error, AccentRed, "Falhou")
-        StageStatus.PENDING -> Triple(Icons.Default.HourglassEmpty, TextMuted, "Aguardando")
+    val isCompleted = isSuccess || (!isFailure && currentStep > stepNumber)
+    val isActive = !isSuccess && !isFailure && currentStep == stepNumber
+
+    val bgColor = when {
+        isCompleted -> Color(0xFF0C2417)
+        isActive -> Color(0xFF0E2233)
+        isFailure -> Color(0xFF281114)
+        else -> Color(0xFF12161E)
     }
 
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
+    val contentColor = when {
+        isCompleted -> AccentEmerald
+        isActive -> AccentCyan
+        isFailure -> AccentRed
+        else -> TextMuted
+    }
+
+    val borderColor = when {
+        isCompleted -> AccentEmerald.copy(alpha = 0.4f)
+        isActive -> AccentCyan.copy(alpha = 0.5f)
+        isFailure -> AccentRed.copy(alpha = 0.4f)
+        else -> TerminalCardBorder
+    }
+
+    Box(
+        modifier = modifier
             .clip(RoundedCornerShape(12.dp))
-            .border(
-                1.dp,
-                if (stage.status == StageStatus.IN_PROGRESS) AccentCyan.copy(alpha = 0.5f) else TerminalCardBorder,
-                RoundedCornerShape(12.dp)
-            ),
-        colors = CardDefaults.cardColors(containerColor = TerminalCardBg)
+            .background(bgColor)
+            .border(1.dp, borderColor, RoundedCornerShape(12.dp))
+            .padding(vertical = 10.dp, horizontal = 4.dp),
+        contentAlignment = Alignment.Center
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onToggleExpand() }
-                    .padding(14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    if (stage.status == StageStatus.IN_PROGRESS) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            color = AccentCyan,
-                            strokeWidth = 2.5.dp
-                        )
-                    } else {
-                        Icon(
-                            imageVector = statusIcon,
-                            contentDescription = null,
-                            tint = statusColor,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.width(12.dp))
-
-                    Column {
-                        Text(
-                            text = stage.title,
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary
-                        )
-                        Text(
-                            text = "${stage.subtitle} • $statusLabel",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = statusColor,
-                            fontSize = 11.sp
-                        )
-                    }
-                }
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (stage.lines.isNotEmpty()) {
-                        Text(
-                            text = "${stage.lines.size} linhas",
-                            fontSize = 11.sp,
-                            color = TextMuted,
-                            fontFamily = FontFamily.Monospace,
-                            modifier = Modifier.padding(end = 6.dp)
-                        )
-                    }
-                    Icon(
-                        imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                        contentDescription = if (isExpanded) "Recolher" else "Expandir",
-                        tint = TextSecondary,
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            if (isCompleted) {
+                Icon(
+                    imageVector = Icons.Default.CheckCircle,
+                    contentDescription = null,
+                    tint = AccentEmerald,
+                    modifier = Modifier.size(14.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+            } else if (isActive) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(12.dp),
+                    color = AccentCyan,
+                    strokeWidth = 2.dp
+                )
+                Spacer(modifier = Modifier.width(5.dp))
+            } else if (isFailure) {
+                Icon(
+                    imageVector = Icons.Default.Error,
+                    contentDescription = null,
+                    tint = AccentRed,
+                    modifier = Modifier.size(14.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
             }
 
-            // Expanded Stage Log Content
-            AnimatedVisibility(visible = isExpanded && stage.lines.isNotEmpty()) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color(0xFF090D12))
-                        .border(1.dp, Color(0xFF1B232D))
-                        .padding(12.dp)
-                ) {
-                    stage.lines.forEach { line ->
-                        val isErr = line.contains("error", ignoreCase = true) ||
-                                line.contains("fail", ignoreCase = true) ||
-                                line.startsWith("[FALHA]") || line.startsWith("[ERRO]")
-                        val isOk = line.contains("success", ignoreCase = true) ||
-                                line.startsWith("[SUCESSO]")
-                        val textColor = when {
-                            isErr -> AccentRed
-                            isOk -> AccentEmerald
-                            else -> TextSecondary
-                        }
-                        Text(
-                            text = line,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 11.sp,
-                            color = textColor,
-                            lineHeight = 15.sp,
-                            modifier = Modifier.padding(vertical = 1.dp)
-                        )
-                    }
-                }
-            }
+            Text(
+                text = label,
+                color = contentColor,
+                fontWeight = if (isActive || isCompleted) FontWeight.Bold else FontWeight.Normal,
+                fontSize = 11.sp,
+                maxLines = 1
+            )
         }
     }
 }

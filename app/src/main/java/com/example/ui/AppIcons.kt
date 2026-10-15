@@ -525,3 +525,166 @@ val Icons.Filled.Schedule: ImageVector
 
 val Icons.Filled.Segment: ImageVector
     get() = Icons.AutoMirrored.Filled.Segment
+
+private var _arrowBack: ImageVector? = null
+val Icons.AutoMirrored.Filled.ArrowBack: ImageVector
+    get() {
+        if (_arrowBack != null) return _arrowBack!!
+        _arrowBack = ImageVector.Builder(
+            name = "ArrowBack",
+            defaultWidth = 24.dp,
+            defaultHeight = 24.dp,
+            viewportWidth = 24f,
+            viewportHeight = 24f
+        ).path(fill = SolidColor(Color.Black)) {
+            moveTo(20.0f, 11.0f)
+            horizontalLineTo(7.83f)
+            lineToRelative(5.59f, -5.59f)
+            lineTo(12.0f, 4.0f)
+            lineToRelative(-8.0f, 8.0f)
+            lineToRelative(8.0f, 8.0f)
+            lineToRelative(1.41f, -1.41f)
+            lineTo(7.83f, 13.0f)
+            horizontalLineTo(20.0f)
+            verticalLineToRelative(-2.0f)
+            close()
+        }.build()
+        return _arrowBack!!
+    }
+
+private var _checkCircle: ImageVector? = null
+val Icons.Filled.CheckCircle: ImageVector
+    get() {
+        if (_checkCircle != null) return _checkCircle!!
+        _checkCircle = ImageVector.Builder(
+            name = "CheckCircle",
+            defaultWidth = 24.dp,
+            defaultHeight = 24.dp,
+            viewportWidth = 24f,
+            viewportHeight = 24f
+        ).path(fill = SolidColor(Color.Black)) {
+            moveTo(12.0f, 2f)
+            curveTo(6.48f, 2f, 2f, 6.48f, 2f, 12.0f)
+            reflectiveCurveToRelative(4.48f, 10.0f, 10.0f, 10.0f)
+            reflectiveCurveToRelative(10.0f, -4.48f, 10.0f, -10.0f)
+            reflectiveCurveTo(17.52f, 2f, 12.0f, 2f)
+            close()
+            moveTo(10.0f, 17.0f)
+            lineToRelative(-5.0f, -5.0f)
+            lineToRelative(1.41f, -1.41f)
+            lineTo(10.0f, 14.17f)
+            lineToRelative(7.59f, -7.59f)
+            lineTo(19.0f, 8.0f)
+            lineToRelative(-9.0f, 9.0f)
+            close()
+        }.build()
+        return _checkCircle!!
+    }
+
+private var _keyboardArrowDown: ImageVector? = null
+val Icons.Filled.KeyboardArrowDown: ImageVector
+    get() {
+        if (_keyboardArrowDown != null) return _keyboardArrowDown!!
+        _keyboardArrowDown = ImageVector.Builder(
+            name = "KeyboardArrowDown",
+            defaultWidth = 24.dp,
+            defaultHeight = 24.dp,
+            viewportWidth = 24f,
+            viewportHeight = 24f
+        ).path(fill = SolidColor(Color.Black)) {
+            moveTo(7.41f, 8.59f)
+            lineTo(12.0f, 13.17f)
+            lineToRelative(4.59f, -4.58f)
+            lineTo(18.0f, 10.0f)
+            lineToRelative(-6.0f, 6.0f)
+            lineToRelative(-6.0f, -6.0f)
+            lineToRelative(1.41f, -1.41f)
+            close()
+        }.build()
+        return _keyboardArrowDown!!
+    }
+
+private var _keyboardArrowUp: ImageVector? = null
+val Icons.Filled.KeyboardArrowUp: ImageVector
+    get() {
+        if (_keyboardArrowUp != null) return _keyboardArrowUp!!
+        _keyboardArrowUp = ImageVector.Builder(
+            name = "KeyboardArrowUp",
+            defaultWidth = 24.dp,
+            defaultHeight = 24.dp,
+            viewportWidth = 24f,
+            viewportHeight = 24f
+        ).path(fill = SolidColor(Color.Black)) {
+            moveTo(7.41f, 15.41f)
+            lineTo(12.0f, 10.83f)
+            lineToRelative(4.59f, 4.58f)
+            lineTo(18.0f, 14.0f)
+            lineToRelative(-6.0f, -6.0f)
+            lineToRelative(-6.0f, 6.0f)
+            close()
+        }.build()
+        return _keyboardArrowUp!!
+    }
+
+private var _refresh: ImageVector? = null
+val Icons.Filled.Refresh: ImageVector
+    get() {
+        if (_refresh != null) return _refresh!!
+        _refresh = ImageVector.Builder(
+            name = "Refresh",
+            defaultWidth = 24.dp,
+            defaultHeight = 24.dp,
+            viewportWidth = 24f,
+            viewportHeight = 24f
+        ).path(fill = SolidColor(Color.Black)) {
+            moveTo(17.65f, 6.35f)
+            curveTo(16.2f, 4.9f, 14.21f, 4.0f, 12.0f, 4.0f)
+            curveToRelative(-4.42f, 0f, -7.99f, 3.58f, -7.99f, 8.0f)
+            reflectiveCurveToRelative(3.57f, 8.0f, 7.99f, 8.0f)
+            curveToRelative(3.73f, 0f, 6.84f, -2.55f, 7.73f, -6.0f)
+            horizontalLineToRelative(-2.08f)
+            curveToRelative(-0.82f, 2.33f, -3.04f, 4.0f, -5.65f, 4.0f)
+            curveToRelative(-3.31f, 0f, -6.0f, -2.69f, -6.0f, -6.0f)
+            reflectiveCurveToRelative(2.69f, -6.0f, 6.0f, -6.0f)
+            curveToRelative(1.66f, 0f, 3.14f, 0.69f, 4.22f, 1.78f)
+            lineTo(13.0f, 11.0f)
+            horizontalLineToRelative(7.0f)
+            verticalLineTo(4.0f)
+            lineToRelative(-2.35f, 2.35f)
+            close()
+        }.build()
+        return _refresh!!
+    }
+
+private var _delete: ImageVector? = null
+val Icons.Filled.Delete: ImageVector
+    get() {
+        if (_delete != null) return _delete!!
+        _delete = ImageVector.Builder(
+            name = "Delete",
+            defaultWidth = 24.dp,
+            defaultHeight = 24.dp,
+            viewportWidth = 24f,
+            viewportHeight = 24f
+        ).path(fill = SolidColor(Color.Black)) {
+            moveTo(6.0f, 19.0f)
+            curveToRelative(0f, 1.1f, 0.9f, 2f, 2f, 2f)
+            horizontalLineToRelative(8.0f)
+            curveToRelative(1.1f, 0f, 2f, -0.9f, 2f, -2.0f)
+            verticalLineTo(7.0f)
+            horizontalLineTo(6.0f)
+            verticalLineToRelative(12.0f)
+            close()
+            moveTo(19.0f, 4.0f)
+            horizontalLineToRelative(-3.5f)
+            lineToRelative(-1.0f, -1.0f)
+            horizontalLineToRelative(-5.0f)
+            lineToRelative(-1.0f, 1f)
+            horizontalLineTo(5.0f)
+            verticalLineToRelative(2f)
+            horizontalLineToRelative(14.0f)
+            verticalLineTo(4.0f)
+            close()
+        }.build()
+        return _delete!!
+    }

@@ -22,16 +22,24 @@ class BuildForegroundService : Service() {
 
         const val EXTRA_STATUS = "extra_status"
         const val EXTRA_PROJECT_NAME = "extra_project_name"
+        const val EXTRA_STEP_NUMBER = "extra_step_number"
+        const val EXTRA_PROGRESS_PERCENT = "extra_progress_percent"
         const val EXTRA_IS_DONE = "extra_is_done"
         const val EXTRA_IS_SUCCESS = "extra_is_success"
         const val EXTRA_APK_PATH = "extra_apk_path"
 
-        fun startService(context: Context, statusMessage: String, projectName: String = "Projeto Android") {
+        fun startService(
+            context: Context,
+            projectName: String = "Projeto Android",
+            stepNumber: Int = 1,
+            statusMessage: String = "Iniciando preparação..."
+        ) {
             NotificationHelper.setupChannels(context)
             val intent = Intent(context, BuildForegroundService::class.java).apply {
                 action = ACTION_START
-                putExtra(EXTRA_STATUS, statusMessage)
                 putExtra(EXTRA_PROJECT_NAME, projectName)
+                putExtra(EXTRA_STEP_NUMBER, stepNumber)
+                putExtra(EXTRA_STATUS, statusMessage)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
@@ -40,10 +48,19 @@ class BuildForegroundService : Service() {
             }
         }
 
-        fun updateStatus(context: Context, statusMessage: String) {
+        fun updateStatus(
+            context: Context,
+            stepNumber: Int,
+            statusMessage: String,
+            progressPercent: Int? = null
+        ) {
             val intent = Intent(context, BuildForegroundService::class.java).apply {
                 action = ACTION_UPDATE
+                putExtra(EXTRA_STEP_NUMBER, stepNumber)
                 putExtra(EXTRA_STATUS, statusMessage)
+                if (progressPercent != null) {
+                    putExtra(EXTRA_PROGRESS_PERCENT, progressPercent)
+                }
             }
             context.startService(intent)
         }
@@ -67,6 +84,12 @@ class BuildForegroundService : Service() {
         }
     }
 
+    private var currentProjectName = "Projeto Android"
+    private var lastUpdateTime = 0L
+    private var lastStepNumber = -1
+    private var lastStatusMessage = ""
+    private var lastPercent = -1
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -76,8 +99,13 @@ class BuildForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action ?: ACTION_START
-        val statusMessage = intent?.getStringExtra(EXTRA_STATUS) ?: "Compilando no GitHub Actions..."
-        val projectName = intent?.getStringExtra(EXTRA_PROJECT_NAME) ?: "Projeto Android"
+        val projectName = intent?.getStringExtra(EXTRA_PROJECT_NAME) ?: currentProjectName
+        currentProjectName = projectName
+        val statusMessage = intent?.getStringExtra(EXTRA_STATUS) ?: "Compilando..."
+        val stepNumber = intent?.getIntExtra(EXTRA_STEP_NUMBER, 1) ?: 1
+        val hasPercent = intent?.hasExtra(EXTRA_PROGRESS_PERCENT) == true
+        val progressPercent = if (hasPercent) intent.getIntExtra(EXTRA_PROGRESS_PERCENT, 0) else null
+
         val isDone = intent?.getBooleanExtra(EXTRA_IS_DONE, false) ?: false
         val isSuccess = intent?.getBooleanExtra(EXTRA_IS_SUCCESS, false) ?: false
         val apkPath = intent?.getStringExtra(EXTRA_APK_PATH)
@@ -85,7 +113,11 @@ class BuildForegroundService : Service() {
 
         when (action) {
             ACTION_START -> {
-                val notification = buildProgressNotification(statusMessage, projectName)
+                lastStepNumber = stepNumber
+                lastStatusMessage = statusMessage
+                lastUpdateTime = System.currentTimeMillis()
+
+                val notification = buildProgressNotification(stepNumber, statusMessage, projectName, progressPercent)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     ServiceCompat.startForeground(
                         this,
@@ -97,11 +129,26 @@ class BuildForegroundService : Service() {
                     startForeground(NotificationHelper.PROGRESS_NOTIFICATION_ID, notification)
                 }
             }
+
             ACTION_UPDATE -> {
-                val notification = buildProgressNotification(statusMessage, projectName)
-                val manager = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
-                manager.notify(NotificationHelper.PROGRESS_NOTIFICATION_ID, notification)
+                val now = System.currentTimeMillis()
+                val isStepChanged = stepNumber != lastStepNumber
+                val isPercentChanged = progressPercent != null && progressPercent != lastPercent
+                val timePassed = (now - lastUpdateTime) >= 800L
+
+                // Super optimized: only update notification when step changes, percent changes, or 800ms+ passed
+                if (isStepChanged || isPercentChanged || (timePassed && statusMessage != lastStatusMessage)) {
+                    lastStepNumber = stepNumber
+                    lastStatusMessage = statusMessage
+                    if (progressPercent != null) lastPercent = progressPercent
+                    lastUpdateTime = now
+
+                    val notification = buildProgressNotification(stepNumber, statusMessage, currentProjectName, progressPercent)
+                    val manager = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+                    manager.notify(NotificationHelper.PROGRESS_NOTIFICATION_ID, notification)
+                }
             }
+
             ACTION_STOP -> {
                 if (isDone) {
                     NotificationHelper.showCompletionAlert(
@@ -121,8 +168,10 @@ class BuildForegroundService : Service() {
     }
 
     private fun buildProgressNotification(
+        stepNumber: Int,
         message: String,
-        projectName: String
+        projectName: String,
+        progressPercent: Int?
     ): android.app.Notification {
         val openAppIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -134,14 +183,33 @@ class BuildForegroundService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        return NotificationCompat.Builder(this, NotificationHelper.PROGRESS_CHANNEL_ID)
-            .setContentTitle("Compilando: $projectName")
-            .setContentText(message)
+        // Super clean and direct text
+        val title = "GitBuilder • $projectName"
+        val contentText = if (stepNumber in 1..6) {
+            "Etapa $stepNumber/6 • $message"
+        } else {
+            message
+        }
+
+        val builder = NotificationCompat.Builder(this, NotificationHelper.PROGRESS_CHANNEL_ID)
+            .setContentTitle(title)
+            .setContentText(contentText)
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setOngoing(true)
-            .setProgress(0, 0, true)
-            .setContentIntent(pendingIntent)
+            .setOnlyAlertOnce(true)
+            .setShowWhen(false)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build()
+            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
+            .setContentIntent(pendingIntent)
+
+        if (progressPercent != null && progressPercent in 0..100) {
+            builder.setProgress(100, progressPercent, false)
+        } else if (stepNumber in 1..6) {
+            builder.setProgress(6, stepNumber, false)
+        } else {
+            builder.setProgress(0, 0, true)
+        }
+
+        return builder.build()
     }
 }

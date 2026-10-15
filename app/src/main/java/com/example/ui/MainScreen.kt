@@ -55,9 +55,9 @@ fun MainScreen(
             LogsCleanScreen(
                 state = state,
                 onBackClick = viewModel::goToSelectZipScreen,
-                onToggleViewMode = viewModel::toggleLogViewMode,
                 onDownloadApkClick = { viewModel.downloadAndOpenApk(context) },
                 onCopyLogsClick = { viewModel.copyLogsToClipboard(context) },
+                onClearLogsCopiedMessage = viewModel::clearLogsCopiedMessage,
                 modifier = modifier
             )
         }

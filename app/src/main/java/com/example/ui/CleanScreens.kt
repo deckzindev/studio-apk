@@ -2,6 +2,8 @@ package com.example.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -21,25 +23,16 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -81,6 +74,7 @@ import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 import com.example.util.ZipHelper
+import kotlinx.coroutines.delay
 
 /**
  * Screen 1: Clean screen with ONLY GitHub Token input and Save button.
@@ -369,25 +363,24 @@ fun SelectZipCleanScreen(
 }
 
 /**
- * Screen 3: Organized compilation logs screen.
- * Displays logs organized by clean, expandable STAGES so the user never gets confused,
- * with option to switch to raw terminal view.
+ * Screen 3: Compilation screen showing ONLY clean, organized stages.
+ * The raw logs toggle button has been removed.
+ * At the bottom, a prominent button copies the complete logs from the very start to finish.
  */
 @Composable
 fun LogsCleanScreen(
     state: BuildUiState,
     onBackClick: () -> Unit,
-    onToggleViewMode: () -> Unit,
     onDownloadApkClick: () -> Unit,
     onCopyLogsClick: () -> Unit,
+    onClearLogsCopiedMessage: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val rawListState = rememberLazyListState()
     BackHandler { onBackClick() }
 
     val expandedStages = remember { mutableStateMapOf<String, Boolean>() }
 
-    // Auto-expand stage in progress
+    // Auto-expand stage currently in progress
     LaunchedEffect(state.stages) {
         state.stages.forEach { stage ->
             if (stage.status == StageStatus.IN_PROGRESS) {
@@ -396,14 +389,11 @@ fun LogsCleanScreen(
         }
     }
 
-    val logLines = remember(state.logsText) {
-        if (state.logsText.isEmpty()) emptyList()
-        else state.logsText.lines()
-    }
-
-    LaunchedEffect(logLines.size) {
-        if (logLines.isNotEmpty() && state.logViewMode == LogViewMode.RAW_LOGS) {
-            rawListState.animateScrollToItem(logLines.size - 1)
+    // Auto-dismiss copied confirmation message after 3 seconds
+    LaunchedEffect(state.logsCopiedMessage) {
+        if (state.logsCopiedMessage != null) {
+            delay(3000)
+            onClearLogsCopiedMessage()
         }
     }
 
@@ -430,7 +420,10 @@ fun LogsCleanScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
                     IconButton(
                         onClick = onBackClick,
                         modifier = Modifier.testTag("back_button")
@@ -462,72 +455,53 @@ fun LogsCleanScreen(
                     }
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    // Toggle View Mode (Stages vs Raw Logs)
-                    FilterChip(
-                        selected = state.logViewMode == LogViewMode.STAGES,
-                        onClick = onToggleViewMode,
-                        label = {
-                            Text(
-                                text = if (state.logViewMode == LogViewMode.STAGES) "Etapas" else "Bruto",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = if (state.logViewMode == LogViewMode.STAGES) Icons.AutoMirrored.Filled.Segment else Icons.Default.Terminal,
-                                contentDescription = null,
-                                modifier = Modifier.size(14.dp)
-                            )
-                        },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = AccentCyan.copy(alpha = 0.2f),
-                            selectedLabelColor = AccentCyan,
-                            selectedLeadingIconColor = AccentCyan,
-                            containerColor = Color(0xFF161E28),
-                            labelColor = TextMuted,
-                            iconColor = TextMuted
-                        ),
-                        border = FilterChipDefaults.filterChipBorder(
-                            enabled = true,
-                            selected = state.logViewMode == LogViewMode.STAGES,
-                            borderColor = if (state.logViewMode == LogViewMode.STAGES) AccentCyan else TerminalCardBorder
-                        ),
-                        modifier = Modifier.padding(end = 4.dp).testTag("toggle_view_mode_chip")
+                // Header quick copy logs button
+                IconButton(
+                    onClick = onCopyLogsClick,
+                    modifier = Modifier.testTag("copy_logs_header_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ContentCopy,
+                        contentDescription = "Copiar logs completos",
+                        tint = TextSecondary
                     )
-
-                    IconButton(
-                        onClick = onCopyLogsClick,
-                        modifier = Modifier.testTag("copy_logs_header_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ContentCopy,
-                            contentDescription = "Copiar logs",
-                            tint = TextSecondary
-                        )
-                    }
                 }
             }
 
             // Progress bar
             if (!isFinished) {
                 LinearProgressIndicator(
-                    modifier = Modifier.fillMaxWidth().height(3.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(3.dp),
                     color = AccentCyan,
                     trackColor = TerminalCardBorder
                 )
             }
 
-            // Main Body: Either Organized Stages or Raw Terminal
+            // Main Body: ONLY ORGANIZED STAGES (No raw logs switch)
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
                     .background(TerminalBlack)
             ) {
-                if (state.logViewMode == LogViewMode.STAGES) {
-                    // ORGANIZED STAGES VIEW
+                if (state.stages.isEmpty()) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator(color = AccentCyan, strokeWidth = 3.dp)
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = "Iniciando compilação no GitHub Actions...",
+                                color = TextSecondary,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                } else {
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxSize()
@@ -546,69 +520,37 @@ fun LogsCleanScreen(
                             )
                         }
                     }
-                } else {
-                    // RAW TERMINAL VIEW
-                    if (logLines.isEmpty()) {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                CircularProgressIndicator(color = AccentCyan, strokeWidth = 3.dp)
-                                Spacer(modifier = Modifier.height(16.dp))
-                                Text(
-                                    text = "Iniciando compilação no GitHub Actions...",
-                                    color = TextSecondary,
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-                            }
-                        }
-                    } else {
-                        LazyColumn(
-                            state = rawListState,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(8.dp)
-                                .testTag("raw_logs_list")
-                        ) {
-                            itemsIndexed(logLines) { index, line ->
-                                val isError = line.contains("ERROR", ignoreCase = true) ||
-                                        line.contains("FAILURE", ignoreCase = true) ||
-                                        line.contains("FAILED", ignoreCase = true) ||
-                                        line.startsWith("[FALHA]") || line.startsWith("[ERRO]")
-                                val isSuccess = line.contains("SUCCESSFUL", ignoreCase = true) ||
-                                        line.startsWith("[SUCESSO]")
-                                val isHeader = line.startsWith(">>>")
+                }
+            }
 
-                                val color = when {
-                                    isError -> AccentRed
-                                    isSuccess -> AccentEmerald
-                                    isHeader -> AccentCyan
-                                    else -> TextPrimary
-                                }
-
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 1.dp)
-                                ) {
-                                    Text(
-                                        text = String.format(java.util.Locale.US, "%4d ", index + 1),
-                                        fontFamily = FontFamily.Monospace,
-                                        fontSize = 11.sp,
-                                        color = TextMuted
-                                    )
-                                    Text(
-                                        text = line,
-                                        fontFamily = FontFamily.Monospace,
-                                        fontSize = 11.sp,
-                                        color = color,
-                                        lineHeight = 15.sp,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
-                            }
-                        }
+            // Subtle toast/card when logs are copied
+            AnimatedVisibility(
+                visible = state.logsCopiedMessage != null,
+                enter = fadeIn(),
+                exit = fadeOut()
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFF0C2417))
+                        .border(1.dp, AccentEmerald.copy(alpha = 0.5f))
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = AccentEmerald,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = state.logsCopiedMessage ?: "",
+                            color = AccentEmerald,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
+                        )
                     }
                 }
             }
@@ -669,7 +611,7 @@ fun LogsCleanScreen(
                     Spacer(modifier = Modifier.height(10.dp))
                 }
 
-                // Copy All Logs Button (Always visible!)
+                // Button: Copy Complete Logs from start to end (Always visible and prominent!)
                 Button(
                     onClick = onCopyLogsClick,
                     shape = RoundedCornerShape(12.dp),
@@ -679,8 +621,8 @@ fun LogsCleanScreen(
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(48.dp)
-                        .testTag("copy_all_logs_button")
+                        .height(50.dp)
+                        .testTag("copy_complete_logs_button")
                 ) {
                     Icon(
                         imageVector = Icons.Default.ContentCopy,
@@ -688,7 +630,11 @@ fun LogsCleanScreen(
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Copiar Todos os Logs", fontWeight = FontWeight.Bold)
+                    Text(
+                        text = "Copiar Logs Completos (Início ao Fim)",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
                 }
 
                 if (isFinished) {
@@ -729,9 +675,9 @@ private fun StageCard(
 ) {
     val (statusIcon, statusColor, statusLabel) = when (stage.status) {
         StageStatus.SUCCESS -> Triple(Icons.Default.CheckCircle, AccentEmerald, "Concluído")
-        StageStatus.IN_PROGRESS -> Triple(Icons.Default.HourglassEmpty, AccentCyan, "Em andamento")
+        StageStatus.IN_PROGRESS -> Triple(Icons.Default.HourglassEmpty, AccentCyan, "Em andamento...")
         StageStatus.FAILURE -> Triple(Icons.Default.Error, AccentRed, "Falhou")
-        StageStatus.PENDING -> Triple(Icons.Default.HourglassEmpty, TextMuted, "Pendente")
+        StageStatus.PENDING -> Triple(Icons.Default.HourglassEmpty, TextMuted, "Aguardando")
     }
 
     Card(
@@ -819,7 +765,7 @@ private fun StageCard(
                         .border(1.dp, Color(0xFF1B232D))
                         .padding(12.dp)
                 ) {
-                    stage.lines.forEachIndexed { i, line ->
+                    stage.lines.forEach { line ->
                         val isErr = line.contains("error", ignoreCase = true) ||
                                 line.contains("fail", ignoreCase = true) ||
                                 line.startsWith("[FALHA]") || line.startsWith("[ERRO]")

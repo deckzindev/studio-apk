@@ -24,21 +24,24 @@ object NotificationHelper {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
-            // Channel 1: Background compilation progress (Ongoing, Low importance)
+            // Channel 1: Clean background compilation progress (Low importance, silent, smooth)
             val progressChannel = NotificationChannel(
                 PROGRESS_CHANNEL_ID,
-                "Compilação em Andamento",
+                "Progresso da Compilação",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Progresso contínuo de compilação em segundo plano"
+                description = "Progresso em tempo real das etapas da compilação do APK"
                 setShowBadge(false)
+                enableLights(false)
+                enableVibration(false)
+                setSound(null, null)
             }
             manager.createNotificationChannel(progressChannel)
 
-            // Channel 2: Completion alerts (High importance, Sound, Vibration, Heads-up)
+            // Channel 2: Completion alerts (High importance, sound, vibration on completion)
             val alertChannel = NotificationChannel(
                 ALERT_CHANNEL_ID,
-                "Alertas de Compilação Concluída",
+                "Conclusão da Compilação",
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "Notificações de sucesso ou falha da compilação do APK"
@@ -73,13 +76,13 @@ object NotificationHelper {
         val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
 
         val title = if (isSuccess) {
-            "🎉 Compilação Concluída com Sucesso!"
+            "🎉 APK Compilado com Sucesso!"
         } else {
             "❌ Falha na Compilação"
         }
 
         val contentText = if (isSuccess) {
-            "O APK do projeto '$projectName' está pronto para download e instalação."
+            "O APK do projeto '$projectName' está pronto para download."
         } else {
             "A compilação de '$projectName' falhou. Toque para verificar os logs."
         }
@@ -96,7 +99,7 @@ object NotificationHelper {
             .setAutoCancel(true)
             .setContentIntent(pendingOpenApp)
 
-        // If APK file is readily available, add quick Install action directly from notification!
+        // If APK file is ready on device, add one-tap install button
         if (isSuccess && apkFile != null && apkFile.exists()) {
             try {
                 val authority = "${context.packageName}.fileprovider"

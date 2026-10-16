@@ -109,8 +109,8 @@ class TokenStorage(context: Context) {
 
     fun isLoggedIn(): Boolean {
         val uid = getSupabaseUserId()
-        val token = getSupabaseAccessToken()
-        return !uid.isNullOrBlank() && !token.isNullOrBlank()
+        val email = getSupabaseUserEmail()
+        return !uid.isNullOrBlank() && !email.isNullOrBlank()
     }
 
     fun logout() {

@@ -41,8 +41,7 @@ enum class AppScreen {
     AUTH,
     SELECT_ZIP,
     BUILD_PROGRESS,
-    HISTORY,
-    SUPABASE_CONFIG
+    HISTORY
 }
 
 enum class BuildPhase {
@@ -371,14 +370,33 @@ class BuildViewModel(application: Application) : AndroidViewModel(application) {
 
                     val session = signUpResult.getOrThrow()
                     val user = session.user
+                    val finalUid = user.id.ifBlank { UUID.randomUUID().toString() }
+                    val finalName = user.name.ifBlank { name }
+                    var accessToken = session.accessToken
+                    var refreshToken = session.refreshToken
 
-                    // Save session securely
+                    if (accessToken.isBlank()) {
+                        val autoLogin = supabaseClient.signIn(supaUrl, supaKey, email, password).getOrNull()
+                        if (autoLogin != null) {
+                            accessToken = autoLogin.accessToken
+                            refreshToken = autoLogin.refreshToken
+                        }
+                    }
+
+                    // Save session securely so user only enters credentials once
                     tokenStorage.saveSupabaseSession(
-                        userId = user.id,
-                        email = user.email,
-                        name = user.name,
-                        accessToken = session.accessToken,
-                        refreshToken = session.refreshToken,
+                        userId = finalUid,
+                        email = email,
+                        name = finalName,
+                        accessToken = accessToken,
+                        refreshToken = refreshToken,
+                        dedicatedRepo = dedicatedRepo
+                    )
+
+                    val persistentUser = SupabaseUser(
+                        id = finalUid,
+                        email = email,
+                        name = finalName,
                         dedicatedRepo = dedicatedRepo
                     )
 
@@ -406,7 +424,7 @@ class BuildViewModel(application: Application) : AndroidViewModel(application) {
                         it.copy(
                             isAuthenticating = false,
                             currentScreen = AppScreen.SELECT_ZIP,
-                            currentUser = user,
+                            currentUser = persistentUser,
                             dedicatedRepo = dedicatedRepo,
                             targetRepo = dedicatedRepo,
                             authErrorMessage = null,
@@ -414,7 +432,7 @@ class BuildViewModel(application: Application) : AndroidViewModel(application) {
                         )
                     }
 
-                    observeUserHistory(user.id)
+                    observeUserHistory(persistentUser.id)
                     syncHistory(silent = true)
 
                 } catch (e: Exception) {
@@ -516,69 +534,6 @@ class BuildViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(currentScreen = AppScreen.AUTH) }
     }
 
-    fun goToTokenScreen() {
-        _uiState.update { it.copy(currentScreen = AppScreen.SUPABASE_CONFIG) }
-    }
-
-    fun goToSupabaseConfig() {
-        _uiState.update { it.copy(currentScreen = AppScreen.SUPABASE_CONFIG) }
-    }
-
-    fun onTokenInputChanged(token: String) {
-        _uiState.update { it.copy(tokenInput = token, tokenError = null) }
-    }
-
-    fun saveTokenAndCreateRepo() {
-        val state = _uiState.value
-        val token = state.tokenInput.trim()
-        if (token.isBlank()) {
-            _uiState.update { it.copy(tokenError = "Por favor, insira o token do GitHub.") }
-            return
-        }
-
-        viewModelScope.launch {
-            _uiState.update { it.copy(isSavingToken = true, tokenError = null) }
-            try {
-                val userResult = gitHubClient.verifyToken(token)
-                val user = userResult.getOrThrow()
-
-                tokenStorage.saveToken(token)
-                tokenStorage.saveUserInfo(user)
-
-                val dedicatedRepo = state.dedicatedRepo.ifBlank {
-                    tokenStorage.getDedicatedRepo() ?: "gitbuilder-${user.login}-builds"
-                }
-
-                gitHubClient.getOrCreateRepo(token, user.login, dedicatedRepo)
-                tokenStorage.saveDedicatedRepo(dedicatedRepo)
-
-                // Update dedicated repo in Supabase
-                val supaUrl = tokenStorage.getSupabaseUrl()
-                val supaKey = tokenStorage.getSupabaseAnonKey()
-                val supaToken = tokenStorage.getSupabaseAccessToken()
-                if (supaUrl.isNotBlank() && supaKey.isNotBlank() && !supaToken.isNullOrBlank()) {
-                    supabaseClient.updateDedicatedRepo(supaUrl, supaKey, supaToken, dedicatedRepo)
-                }
-
-                _uiState.update {
-                    it.copy(
-                        isSavingToken = false,
-                        tokenUser = user,
-                        targetRepo = dedicatedRepo,
-                        dedicatedRepo = dedicatedRepo,
-                        currentScreen = AppScreen.SELECT_ZIP
-                    )
-                }
-            } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(
-                        isSavingToken = false,
-                        tokenError = e.localizedMessage ?: "Token inválido."
-                    )
-                }
-            }
-        }
-    }
 
     // Build flow initiated by user selecting ZIP
     fun onZipSelected(uri: Uri) {

@@ -37,38 +37,6 @@ fun MainScreen(
                 modifier = modifier
             )
         }
-        AppScreen.SUPABASE_CONFIG -> {
-            // Server config is removed from user UI; route directly to appropriate screen
-            if (state.currentUser != null) {
-                SelectZipCleanScreen(
-                    state = state,
-                    onSelectZipClick = {
-                        zipPickerLauncher.launch(
-                            arrayOf(
-                                "application/zip",
-                                "application/x-zip-compressed",
-                                "application/octet-stream",
-                                "*/*"
-                            )
-                        )
-                    },
-                    onHistoryClick = viewModel::goToHistoryScreen,
-                    onLogoutClick = viewModel::logout,
-                    modifier = modifier
-                )
-            } else {
-                AuthCleanScreen(
-                    state = state,
-                    onNameChanged = viewModel::onAuthNameChanged,
-                    onEmailChanged = viewModel::onAuthEmailChanged,
-                    onPasswordChanged = viewModel::onAuthPasswordChanged,
-                    onConfirmPasswordChanged = viewModel::onAuthConfirmPasswordChanged,
-                    onSubmitAuth = viewModel::submitAuth,
-                    onToggleAuthMode = viewModel::toggleAuthMode,
-                    modifier = modifier
-                )
-            }
-        }
         AppScreen.SELECT_ZIP -> {
             SelectZipCleanScreen(
                 state = state,

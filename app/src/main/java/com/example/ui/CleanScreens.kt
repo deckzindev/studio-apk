@@ -71,83 +71,201 @@ import com.example.util.ZipHelper
 import java.util.Locale
 
 /**
- * Screen 1: Token Configuration Screen (Clean & minimal)
+ * Screen 1: Mandatory Authentication Screen (Supabase Auth)
+ * First-time opening requires mandatory account creation (Nome, E-mail, Senha).
+ * Returning users can log in from any device to access all previous builds and APKs.
+ * GitHub token is managed globally via Supabase backend.
  */
 @Composable
-fun TokenCleanScreen(
+fun AuthCleanScreen(
     state: BuildUiState,
-    onTokenChanged: (String) -> Unit,
-    onSaveClick: () -> Unit,
+    onNameChanged: (String) -> Unit,
+    onEmailChanged: (String) -> Unit,
+    onPasswordChanged: (String) -> Unit,
+    onConfirmPasswordChanged: (String) -> Unit,
+    onSubmitAuth: () -> Unit,
+    onToggleAuthMode: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var passwordVisible by remember { mutableStateOf(false) }
+    var confirmPasswordVisible by remember { mutableStateOf(false) }
+    val scrollState = rememberScrollState()
 
     Surface(
         modifier = modifier.fillMaxSize(),
         color = TerminalBlack
     ) {
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .verticalScroll(scrollState)
                 .padding(24.dp),
-            contentAlignment = Alignment.Center
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
         ) {
-            Column(
+            // App Branding Icon
+            Box(
+                modifier = Modifier
+                    .size(68.dp)
+                    .clip(CircleShape)
+                    .background(AccentCyan.copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = if (state.isSignUpMode) Icons.Default.Person else Icons.Default.Lock,
+                    contentDescription = null,
+                    tint = AccentCyan,
+                    modifier = Modifier.size(34.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                text = if (state.isSignUpMode) "Criar Conta Obrigatória" else "Entrar na sua Conta",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Text(
+                text = if (state.isSignUpMode)
+                    "Crie sua conta para compilar seus projetos Android e manter seu histórico seguro na nuvem."
+                else
+                    "Acesse suas compilações e APKs anteriores de qualquer dispositivo.",
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondary,
+                modifier = Modifier.padding(horizontal = 8.dp),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Form Fields
+            if (state.isSignUpMode) {
+                OutlinedTextField(
+                    value = state.authNameInput,
+                    onValueChange = onNameChanged,
+                    label = { Text("Nome Completo") },
+                    placeholder = { Text("Ex: Carlos Silva", color = TextMuted) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Text,
+                        imeAction = ImeAction.Next
+                    ),
+                    leadingIcon = {
+                        Icon(imageVector = Icons.Default.Person, contentDescription = null, tint = AccentCyan)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("auth_name_input"),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = AccentCyan,
+                        unfocusedBorderColor = TerminalCardBorder,
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        cursorColor = AccentCyan,
+                        focusedLabelColor = AccentCyan
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
+            OutlinedTextField(
+                value = state.authEmailInput,
+                onValueChange = onEmailChanged,
+                label = { Text("E-mail") },
+                placeholder = { Text("seu@email.com", color = TextMuted) },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Email,
+                    imeAction = ImeAction.Next
+                ),
+                leadingIcon = {
+                    Icon(imageVector = Icons.Default.Email, contentDescription = null, tint = AccentCyan)
+                },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(64.dp)
-                        .clip(CircleShape)
-                        .background(AccentCyan.copy(alpha = 0.15f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Key,
-                        contentDescription = "Token GitHub",
-                        tint = AccentCyan,
-                        modifier = Modifier.size(32.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                Text(
-                    text = "Token do GitHub",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = TextPrimary
+                    .testTag("auth_email_input"),
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = AccentCyan,
+                    unfocusedBorderColor = TerminalCardBorder,
+                    focusedTextColor = TextPrimary,
+                    unfocusedTextColor = TextPrimary,
+                    cursorColor = AccentCyan,
+                    focusedLabelColor = AccentCyan
                 )
+            )
 
-                Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-                Text(
-                    text = "Insira seu Personal Access Token com escopo 'repo'",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = TextSecondary
+            OutlinedTextField(
+                value = state.authPasswordInput,
+                onValueChange = onPasswordChanged,
+                label = { Text("Senha") },
+                placeholder = { Text("Mínimo 6 caracteres", color = TextMuted) },
+                singleLine = true,
+                visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Password,
+                    imeAction = if (state.isSignUpMode) ImeAction.Next else ImeAction.Done
+                ),
+                keyboardActions = KeyboardActions(onDone = { if (!state.isSignUpMode) onSubmitAuth() }),
+                leadingIcon = {
+                    Icon(imageVector = Icons.Default.Lock, contentDescription = null, tint = AccentCyan)
+                },
+                trailingIcon = {
+                    IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                        Icon(
+                            imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                            contentDescription = null,
+                            tint = TextSecondary
+                        )
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("auth_password_input"),
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = AccentCyan,
+                    unfocusedBorderColor = TerminalCardBorder,
+                    focusedTextColor = TextPrimary,
+                    unfocusedTextColor = TextPrimary,
+                    cursorColor = AccentCyan,
+                    focusedLabelColor = AccentCyan
                 )
+            )
 
-                Spacer(modifier = Modifier.height(28.dp))
+            if (state.isSignUpMode) {
+                Spacer(modifier = Modifier.height(12.dp))
 
                 OutlinedTextField(
-                    value = state.tokenInput,
-                    onValueChange = onTokenChanged,
-                    placeholder = { Text("ghp_xxxxxxxxxxxxxxxxxxxx", color = TextMuted) },
+                    value = state.authConfirmPasswordInput,
+                    onValueChange = onConfirmPasswordChanged,
+                    label = { Text("Confirmar Senha") },
+                    placeholder = { Text("Repita sua senha", color = TextMuted) },
                     singleLine = true,
-                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    visualTransformation = if (confirmPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Password,
                         imeAction = ImeAction.Done
                     ),
-                    keyboardActions = KeyboardActions(onDone = { onSaveClick() }),
+                    keyboardActions = KeyboardActions(onDone = { onSubmitAuth() }),
+                    leadingIcon = {
+                        Icon(imageVector = Icons.Default.Lock, contentDescription = null, tint = AccentCyan)
+                    },
                     trailingIcon = {
-                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                        IconButton(onClick = { confirmPasswordVisible = !confirmPasswordVisible }) {
                             Icon(
-                                imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                imageVector = if (confirmPasswordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
                                 contentDescription = null,
                                 tint = TextSecondary
                             )
@@ -155,67 +273,285 @@ fun TokenCleanScreen(
                     },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .testTag("github_token_input"),
+                        .testTag("auth_confirm_password_input"),
                     shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = AccentCyan,
                         unfocusedBorderColor = TerminalCardBorder,
                         focusedTextColor = TextPrimary,
                         unfocusedTextColor = TextPrimary,
-                        cursorColor = AccentCyan
+                        cursorColor = AccentCyan,
+                        focusedLabelColor = AccentCyan
                     )
                 )
+            }
 
-                AnimatedVisibility(visible = state.tokenError != null) {
-                    Text(
-                        text = state.tokenError ?: "",
-                        color = AccentRed,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                Button(
-                    onClick = onSaveClick,
-                    enabled = !state.isSavingToken && state.tokenInput.isNotBlank(),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = AccentCyan,
-                        contentColor = Color(0xFF04192B)
-                    ),
+            // Error & Success feedback
+            AnimatedVisibility(visible = state.authErrorMessage != null) {
+                Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(52.dp)
-                        .testTag("save_token_button")
+                        .padding(top = 12.dp),
+                    colors = CardDefaults.cardColors(containerColor = AccentRed.copy(alpha = 0.12f)),
+                    shape = RoundedCornerShape(10.dp)
                 ) {
-                    if (state.isSavingToken) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            color = Color(0xFF04192B),
-                            strokeWidth = 2.5.dp
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text("Configurando repositório...", fontWeight = FontWeight.Bold)
-                    } else {
-                        Text("Salvar Token", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    }
+                    Text(
+                        text = state.authErrorMessage ?: "",
+                        color = AccentRed,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(12.dp)
+                    )
                 }
+            }
+
+            AnimatedVisibility(visible = state.authSuccessMessage != null) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp),
+                    colors = CardDefaults.cardColors(containerColor = AccentEmerald.copy(alpha = 0.12f)),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text(
+                        text = state.authSuccessMessage ?: "",
+                        color = AccentEmerald,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(12.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // Primary Action Button
+            Button(
+                onClick = onSubmitAuth,
+                enabled = !state.isAuthenticating,
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (state.isSignUpMode) AccentEmerald else AccentCyan,
+                    contentColor = Color(0xFF042114)
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(54.dp)
+                    .testTag("submit_auth_button")
+            ) {
+                if (state.isAuthenticating) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = Color(0xFF042114),
+                        strokeWidth = 2.5.dp
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = if (state.isSignUpMode) "Criando conta..." else "Autenticando...",
+                        fontWeight = FontWeight.Bold
+                    )
+                } else {
+                    Text(
+                        text = if (state.isSignUpMode) "Criar Conta & Ativar Nuvem" else "Entrar na Conta",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Toggle Between Sign Up and Login
+            TextButton(
+                onClick = onToggleAuthMode,
+                modifier = Modifier.testTag("toggle_auth_mode_button")
+            ) {
+                Text(
+                    text = if (state.isSignUpMode)
+                        "Já possui uma conta? Fazer Login"
+                    else
+                        "Não tem uma conta? Cadastre-se aqui",
+                    color = AccentCyan,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
             }
         }
     }
 }
 
 /**
- * Screen 2: Select ZIP Screen (Direct & simple)
+ * Screen: Supabase & GitHub Cloud Configuration
+ */
+@Composable
+fun SupabaseConfigCleanScreen(
+    state: BuildUiState,
+    onSupabaseUrlChanged: (String) -> Unit,
+    onSupabaseAnonKeyChanged: (String) -> Unit,
+    onTokenChanged: (String) -> Unit,
+    onSaveConfig: () -> Unit,
+    onBackClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    BackHandler { onBackClick() }
+
+    var anonKeyVisible by remember { mutableStateOf(false) }
+    var tokenVisible by remember { mutableStateOf(false) }
+    val scrollState = rememberScrollState()
+
+    Surface(
+        modifier = modifier.fillMaxSize(),
+        color = TerminalBlack
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .verticalScroll(scrollState)
+                .padding(24.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onBackClick) {
+                    Icon(
+                        imageVector = Icons.Default.KeyboardArrowDown,
+                        contentDescription = "Voltar",
+                        tint = TextPrimary
+                    )
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Configuração do Servidor",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                text = "Gerencie os parâmetros do Supabase (URL, Anon Key) e o Token pessoal do GitHub com escopo 'repo'.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = TextSecondary
+            )
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            OutlinedTextField(
+                value = state.supabaseUrlInput,
+                onValueChange = onSupabaseUrlChanged,
+                label = { Text("URL do Projeto Supabase") },
+                placeholder = { Text("https://xyzcompany.supabase.co", color = TextMuted) },
+                singleLine = true,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("supabase_url_input"),
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = AccentCyan,
+                    unfocusedBorderColor = TerminalCardBorder,
+                    focusedTextColor = TextPrimary,
+                    unfocusedTextColor = TextPrimary,
+                    cursorColor = AccentCyan,
+                    focusedLabelColor = AccentCyan
+                )
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            OutlinedTextField(
+                value = state.supabaseAnonKeyInput,
+                onValueChange = onSupabaseAnonKeyChanged,
+                label = { Text("Supabase Anon Public Key") },
+                placeholder = { Text("eyJhbGciOi...", color = TextMuted) },
+                singleLine = true,
+                visualTransformation = if (anonKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = {
+                    IconButton(onClick = { anonKeyVisible = !anonKeyVisible }) {
+                        Icon(
+                            imageVector = if (anonKeyVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                            contentDescription = null,
+                            tint = TextSecondary
+                        )
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("supabase_anon_key_input"),
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = AccentCyan,
+                    unfocusedBorderColor = TerminalCardBorder,
+                    focusedTextColor = TextPrimary,
+                    unfocusedTextColor = TextPrimary,
+                    cursorColor = AccentCyan,
+                    focusedLabelColor = AccentCyan
+                )
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            OutlinedTextField(
+                value = state.tokenInput,
+                onValueChange = onTokenChanged,
+                label = { Text("Token GitHub (Personal Access Token)") },
+                placeholder = { Text("ghp_xxxxxxxxxxxxxxxxxxxx", color = TextMuted) },
+                singleLine = true,
+                visualTransformation = if (tokenVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = {
+                    IconButton(onClick = { tokenVisible = !tokenVisible }) {
+                        Icon(
+                            imageVector = if (tokenVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                            contentDescription = null,
+                            tint = TextSecondary
+                        )
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("github_token_settings_input"),
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = AccentEmerald,
+                    unfocusedBorderColor = TerminalCardBorder,
+                    focusedTextColor = TextPrimary,
+                    unfocusedTextColor = TextPrimary,
+                    cursorColor = AccentEmerald,
+                    focusedLabelColor = AccentEmerald
+                )
+            )
+
+            Spacer(modifier = Modifier.height(28.dp))
+
+            Button(
+                onClick = onSaveConfig,
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = AccentCyan,
+                    contentColor = Color(0xFF04192B)
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+                    .testTag("save_supabase_config_button")
+            ) {
+                Text("Salvar Configurações", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            }
+        }
+    }
+}
+
+/**
+ * Screen 2: Select ZIP Screen (Direct, simple & user-focused)
  */
 @Composable
 fun SelectZipCleanScreen(
     state: BuildUiState,
     onSelectZipClick: () -> Unit,
     onHistoryClick: () -> Unit,
-    onChangeTokenClick: () -> Unit,
+    onLogoutClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -227,39 +563,94 @@ fun SelectZipCleanScreen(
                 .fillMaxSize()
                 .statusBarsPadding()
         ) {
-            // Header with History button
+            // Header with User Profile, History & Logout
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.End,
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Button(
-                    onClick = onHistoryClick,
-                    shape = RoundedCornerShape(20.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF161E28),
-                        contentColor = TextPrimary
-                    ),
-                    modifier = Modifier.testTag("open_history_button")
+                // User Chip
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.History,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = AccentCyan
-                    )
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(AccentCyan.copy(alpha = 0.2f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = (state.currentUser?.name ?: "U").take(1).uppercase(),
+                            color = AccentCyan,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = state.currentUser?.name ?: "Usuário",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary,
+                            maxLines = 1
+                        )
+                        Text(
+                            text = "Nuvem de Compilação Conectada",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = AccentCyan,
+                            fontSize = 11.sp,
+                            maxLines = 1
+                        )
+                    }
+                }
+
+                // Action buttons: History and Logout
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Button(
+                        onClick = onHistoryClick,
+                        shape = RoundedCornerShape(18.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF161E28),
+                            contentColor = TextPrimary
+                        ),
+                        modifier = Modifier.testTag("open_history_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.History,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = AccentCyan
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (state.historyList.isNotEmpty()) "${state.historyList.size}" else "Histórico",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = if (state.historyList.isNotEmpty()) "Histórico (${state.historyList.size})" else "Histórico",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
+
+                    IconButton(
+                        onClick = onLogoutClick,
+                        modifier = Modifier.testTag("logout_icon_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Logout,
+                            contentDescription = "Sair da conta",
+                            tint = AccentRed.copy(alpha = 0.85f),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
 
-            // Center Content: One big clean button
+            // Center Content: One big clean hero button
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -273,7 +664,7 @@ fun SelectZipCleanScreen(
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(80.dp)
+                            .size(86.dp)
                             .clip(CircleShape)
                             .background(AccentEmerald.copy(alpha = 0.15f)),
                         contentAlignment = Alignment.Center
@@ -282,7 +673,7 @@ fun SelectZipCleanScreen(
                             imageVector = Icons.Default.FolderZip,
                             contentDescription = "Selecionar arquivo",
                             tint = AccentEmerald,
-                            modifier = Modifier.size(40.dp)
+                            modifier = Modifier.size(44.dp)
                         )
                     }
 
@@ -316,14 +707,15 @@ fun SelectZipCleanScreen(
                     Spacer(modifier = Modifier.height(16.dp))
 
                     Text(
-                        text = "A compilação roda em segundo plano mesmo com o app fechado.",
+                        text = "O projeto é compilado na nuvem e o APK fica disponível permanentemente na sua conta.",
                         style = MaterialTheme.typography.bodySmall,
-                        color = TextMuted
+                        color = TextMuted,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
                 }
             }
 
-            // Bottom metadata & change token
+            // Bottom metadata
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -331,26 +723,13 @@ fun SelectZipCleanScreen(
                     .padding(bottom = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                if (state.tokenUser != null) {
-                    Text(
-                        text = "Conectado como @${state.tokenUser.login} • Repo: ${state.targetRepo}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextSecondary,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 11.sp
-                    )
-                }
-
-                TextButton(
-                    onClick = onChangeTokenClick,
-                    modifier = Modifier.testTag("change_token_text_button")
-                ) {
-                    Text(
-                        text = "Trocar Token do GitHub",
-                        color = TextMuted,
-                        fontSize = 12.sp
-                    )
-                }
+                Text(
+                    text = "Conta: ${state.currentUser?.email ?: "Sincronizado"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp
+                )
             }
         }
     }

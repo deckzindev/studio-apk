@@ -156,7 +156,7 @@ fun HistoryCleanScreen(
                             color = TextPrimary
                         )
                         Text(
-                            text = if (state.isSyncingHistory) "Sincronizando com GitHub..."
+                            text = if (state.isSyncingHistory) "Sincronizando compilações..."
                             else "${state.historyList.size} compilações registradas",
                             style = MaterialTheme.typography.bodySmall,
                             color = if (state.isSyncingHistory) AccentCyan else TextSecondary,
@@ -302,7 +302,7 @@ fun HistoryCleanScreen(
                                     modifier = Modifier.size(18.dp)
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("Buscar Compilações no GitHub", fontWeight = FontWeight.Bold)
+                                Text("Atualizar Histórico", fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -445,7 +445,7 @@ private fun HistoryCard(
             Spacer(modifier = Modifier.height(4.dp))
 
             Text(
-                text = "$dateFormatted • Repo: ${record.repoName}",
+                text = "$dateFormatted • Nuvem",
                 style = MaterialTheme.typography.bodySmall,
                 color = TextSecondary,
                 fontSize = 11.sp

@@ -25,13 +25,49 @@ fun MainScreen(
     }
 
     when (state.currentScreen) {
-        AppScreen.TOKEN -> {
-            TokenCleanScreen(
+        AppScreen.AUTH -> {
+            AuthCleanScreen(
                 state = state,
-                onTokenChanged = viewModel::onTokenInputChanged,
-                onSaveClick = viewModel::saveTokenAndCreateRepo,
+                onNameChanged = viewModel::onAuthNameChanged,
+                onEmailChanged = viewModel::onAuthEmailChanged,
+                onPasswordChanged = viewModel::onAuthPasswordChanged,
+                onConfirmPasswordChanged = viewModel::onAuthConfirmPasswordChanged,
+                onSubmitAuth = viewModel::submitAuth,
+                onToggleAuthMode = viewModel::toggleAuthMode,
                 modifier = modifier
             )
+        }
+        AppScreen.SUPABASE_CONFIG -> {
+            // Server config is removed from user UI; route directly to appropriate screen
+            if (state.currentUser != null) {
+                SelectZipCleanScreen(
+                    state = state,
+                    onSelectZipClick = {
+                        zipPickerLauncher.launch(
+                            arrayOf(
+                                "application/zip",
+                                "application/x-zip-compressed",
+                                "application/octet-stream",
+                                "*/*"
+                            )
+                        )
+                    },
+                    onHistoryClick = viewModel::goToHistoryScreen,
+                    onLogoutClick = viewModel::logout,
+                    modifier = modifier
+                )
+            } else {
+                AuthCleanScreen(
+                    state = state,
+                    onNameChanged = viewModel::onAuthNameChanged,
+                    onEmailChanged = viewModel::onAuthEmailChanged,
+                    onPasswordChanged = viewModel::onAuthPasswordChanged,
+                    onConfirmPasswordChanged = viewModel::onAuthConfirmPasswordChanged,
+                    onSubmitAuth = viewModel::submitAuth,
+                    onToggleAuthMode = viewModel::toggleAuthMode,
+                    modifier = modifier
+                )
+            }
         }
         AppScreen.SELECT_ZIP -> {
             SelectZipCleanScreen(
@@ -47,7 +83,7 @@ fun MainScreen(
                     )
                 },
                 onHistoryClick = viewModel::goToHistoryScreen,
-                onChangeTokenClick = viewModel::goToTokenScreen,
+                onLogoutClick = viewModel::logout,
                 modifier = modifier
             )
         }
@@ -66,7 +102,7 @@ fun MainScreen(
                 onBackClick = viewModel::goToSelectZipScreen,
                 onOpenRecord = viewModel::openHistoryRecord,
                 onDeleteRecord = viewModel::deleteHistoryRecord,
-                onSyncHistory = { viewModel.syncHistoryFromGitHub(silent = false) },
+                onSyncHistory = { viewModel.syncHistory(silent = false) },
                 onClearAllHistory = viewModel::clearAllHistory,
                 onClearSyncMessage = viewModel::clearHistorySyncMessage,
                 modifier = modifier

@@ -12,6 +12,9 @@ interface BuildRecordDao {
     @Query("SELECT * FROM build_history ORDER BY timestamp DESC")
     fun getAllBuilds(): Flow<List<BuildRecord>>
 
+    @Query("SELECT * FROM build_history WHERE userId = :userId OR userId IS NULL ORDER BY timestamp DESC")
+    fun getBuildsForUser(userId: String): Flow<List<BuildRecord>>
+
     @Query("SELECT * FROM build_history WHERE id = :id LIMIT 1")
     suspend fun getBuildById(id: String): BuildRecord?
 

@@ -6,6 +6,8 @@ class BuildRepository(private val dao: BuildRecordDao) {
 
     val allBuilds: Flow<List<BuildRecord>> = dao.getAllBuilds()
 
+    fun getBuildsForUser(userId: String): Flow<List<BuildRecord>> = dao.getBuildsForUser(userId)
+
     suspend fun saveBuild(record: BuildRecord) {
         dao.insertOrUpdate(record)
     }

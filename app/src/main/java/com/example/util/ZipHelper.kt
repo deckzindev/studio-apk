@@ -50,7 +50,12 @@ object ZipHelper {
     private val IGNORED_FILENAMES = listOf(
         ".DS_Store",
         "Thumbs.db",
-        "desktop.ini"
+        "desktop.ini",
+        ".env",
+        ".env.local",
+        ".env.production",
+        ".env.development",
+        ".env.staging"
     )
 
     fun readZipFromUri(context: Context, uri: Uri): Result<ProjectAnalysis> = runCatching {

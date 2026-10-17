@@ -159,7 +159,8 @@ class GitHubApiClient {
             for (batch in batches) {
                 val deferredBlobs = batch.map { file ->
                     async(Dispatchers.IO) {
-                        val base64Content = Base64.encodeToString(file.bytes, Base64.NO_WRAP)
+                        val sanitizedBytes = sanitizeFileBytes(file.path, file.bytes)
+                        val base64Content = Base64.encodeToString(sanitizedBytes, Base64.NO_WRAP)
                         val blobPayload = JSONObject().apply {
                             put("content", base64Content)
                             put("encoding", "base64")
@@ -484,5 +485,30 @@ class GitHubApiClient {
             extractedApk = targetApk
         }
         extractedApk
+    }
+
+    private fun sanitizeFileBytes(path: String, bytes: ByteArray): ByteArray {
+        val lower = path.lowercase()
+        val isText = lower.endsWith(".txt") || lower.endsWith(".env") || lower.endsWith(".env.example") ||
+                lower.endsWith(".properties") || lower.endsWith(".json") || lower.endsWith(".xml") ||
+                lower.endsWith(".kt") || lower.endsWith(".java") || lower.endsWith(".gradle") ||
+                lower.endsWith(".kts") || lower.endsWith(".md") || lower.endsWith(".yml") || lower.endsWith(".yaml")
+        if (!isText) return bytes
+
+        return try {
+            val content = String(bytes, Charsets.UTF_8)
+            if (GITHUB_SECRET_REGEX.containsMatchIn(content)) {
+                val sanitized = GITHUB_SECRET_REGEX.replace(content, "your-github-token")
+                sanitized.toByteArray(Charsets.UTF_8)
+            } else {
+                bytes
+            }
+        } catch (_: Exception) {
+            bytes
+        }
+    }
+
+    companion object {
+        private val GITHUB_SECRET_REGEX = Regex("(ghp_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,})")
     }
 }

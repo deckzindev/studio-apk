@@ -29,6 +29,9 @@ class TokenStorage(context: Context) {
         private const val KEY_DEDICATED_REPO = "supabase_dedicated_repo"
         private const val KEY_CUSTOM_SUPABASE_URL = "custom_supabase_url"
         private const val KEY_CUSTOM_SUPABASE_KEY = "custom_supabase_key"
+
+        const val DEFAULT_SUPABASE_URL = "https://byaacfsqttlqzrjenpgn.supabase.co"
+        const val DEFAULT_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ5YWFjZnNxdHRscXpyamVucGduIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIwODk3MDksImV4cCI6MjEwNzY2NTcwOX0.WS1Qid1_wSgkCogsq5lFFWZ532cpgYeFFzXun_R8p_I"
     }
 
     // GitHub Token methods
@@ -134,23 +137,29 @@ class TokenStorage(context: Context) {
     fun getSupabaseUrl(): String {
         val custom = prefs.getString(KEY_CUSTOM_SUPABASE_URL, null)
         if (!custom.isNullOrBlank()) return custom
-        return try {
-            val buildConfigUrl = BuildConfig.SUPABASE_URL
-            if (buildConfigUrl.isNotBlank() && !buildConfigUrl.contains("your-project")) buildConfigUrl else ""
+        val buildConfigUrl = try {
+            BuildConfig.SUPABASE_URL
         } catch (_: Exception) {
             ""
         }
+        if (buildConfigUrl.isNotBlank() && !buildConfigUrl.contains("your-project")) {
+            return buildConfigUrl
+        }
+        return DEFAULT_SUPABASE_URL
     }
 
     fun getSupabaseAnonKey(): String {
         val custom = prefs.getString(KEY_CUSTOM_SUPABASE_KEY, null)
         if (!custom.isNullOrBlank()) return custom
-        return try {
-            val buildConfigKey = BuildConfig.SUPABASE_ANON_KEY
-            if (buildConfigKey.isNotBlank() && !buildConfigKey.contains("your-supabase-anon-key")) buildConfigKey else ""
+        val buildConfigKey = try {
+            BuildConfig.SUPABASE_ANON_KEY
         } catch (_: Exception) {
             ""
         }
+        if (buildConfigKey.isNotBlank() && !buildConfigKey.contains("your-supabase-anon-key")) {
+            return buildConfigKey
+        }
+        return DEFAULT_SUPABASE_ANON_KEY
     }
 
     fun isSupabaseConfigured(): Boolean {

@@ -312,8 +312,8 @@ class BuildViewModel(application: Application) : AndroidViewModel(application) {
     // Primary Auth Submit (Cadastro Obrigatório ou Login)
     fun submitAuth() {
         val state = _uiState.value
-        val supaUrl = tokenStorage.getSupabaseUrl().ifBlank { state.supabaseUrlInput.trim() }
-        val supaKey = tokenStorage.getSupabaseAnonKey().ifBlank { state.supabaseAnonKeyInput.trim() }
+        val supaUrl = tokenStorage.getSupabaseUrl().ifBlank { state.supabaseUrlInput.trim() }.ifBlank { TokenStorage.DEFAULT_SUPABASE_URL }
+        val supaKey = tokenStorage.getSupabaseAnonKey().ifBlank { state.supabaseAnonKeyInput.trim() }.ifBlank { TokenStorage.DEFAULT_SUPABASE_ANON_KEY }
 
         if (supaUrl.isBlank() || supaKey.isBlank()) {
             _uiState.update {

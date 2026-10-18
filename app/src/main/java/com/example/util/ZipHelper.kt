@@ -137,8 +137,12 @@ object ZipHelper {
             val isDirectory = entry.isDirectory || name.endsWith('/')
 
             if (!isDirectory) {
+                val fileName = name.substringAfterLast('/')
                 val shouldIgnore = IGNORED_PREFIXES.any { name.startsWith(it) || name.contains("/$it") } ||
-                        IGNORED_FILENAMES.any { name.endsWith("/$it") || name == it }
+                        IGNORED_FILENAMES.any { name.endsWith("/$it") || name == it } ||
+                        fileName.startsWith(".env", ignoreCase = true) ||
+                        fileName.endsWith(".jks", ignoreCase = true) ||
+                        fileName.endsWith(".keystore", ignoreCase = true)
 
                 if (!shouldIgnore) {
                     val byteOutput = ByteArrayOutputStream()

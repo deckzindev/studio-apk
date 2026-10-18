@@ -509,6 +509,6 @@ class GitHubApiClient {
     }
 
     companion object {
-        private val GITHUB_SECRET_REGEX = Regex("(ghp_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,})")
+        private val GITHUB_SECRET_REGEX = Regex("(gh[pousr]_[A-Za-z0-9_]{16,}|github_pat_[A-Za-z0-9_]{16,})")
     }
 }

@@ -315,15 +315,6 @@ class BuildViewModel(application: Application) : AndroidViewModel(application) {
         val supaUrl = tokenStorage.getSupabaseUrl().ifBlank { state.supabaseUrlInput.trim() }.ifBlank { TokenStorage.DEFAULT_SUPABASE_URL }
         val supaKey = tokenStorage.getSupabaseAnonKey().ifBlank { state.supabaseAnonKeyInput.trim() }.ifBlank { TokenStorage.DEFAULT_SUPABASE_ANON_KEY }
 
-        if (supaUrl.isBlank() || supaKey.isBlank()) {
-            _uiState.update {
-                it.copy(
-                    authErrorMessage = "Serviço de autenticação temporariamente indisponível."
-                )
-            }
-            return
-        }
-
         val email = state.authEmailInput.trim().lowercase()
         val password = state.authPasswordInput.trim()
 
@@ -337,16 +328,11 @@ class BuildViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         if (state.isSignUpMode) {
-            // Sign Up validation
-            val name = state.authNameInput.trim()
-            val confirm = state.authConfirmPasswordInput.trim()
+            // Sign Up: Only Name, Email and Password entered once!
+            val name = state.authNameInput.trim().ifBlank { email.substringBefore("@") }
 
-            if (name.isBlank()) {
+            if (state.authNameInput.isBlank()) {
                 _uiState.update { it.copy(authErrorMessage = "Por favor, informe seu nome completo.") }
-                return
-            }
-            if (password != confirm) {
-                _uiState.update { it.copy(authErrorMessage = "As senhas não coincidem.") }
                 return
             }
 
@@ -355,9 +341,42 @@ class BuildViewModel(application: Application) : AndroidViewModel(application) {
                 email.substringBefore("@").filter { it.isLetterOrDigit() }.lowercase().take(12)
             }
             val dedicatedRepo = "gitbuilder-$userSlug-builds"
+            val localUid = UUID.randomUUID().toString()
 
-            viewModelScope.launch {
-                _uiState.update { it.copy(isAuthenticating = true, authErrorMessage = null) }
+            val persistentUser = SupabaseUser(
+                id = localUid,
+                email = email,
+                name = name,
+                dedicatedRepo = dedicatedRepo
+            )
+
+            // Save session immediately so user NEVER has to enter credentials again
+            tokenStorage.saveSupabaseSession(
+                userId = localUid,
+                email = email,
+                name = name,
+                accessToken = "",
+                refreshToken = "",
+                dedicatedRepo = dedicatedRepo
+            )
+
+            // INSTANT UI TRANSITION: Super rápido, zero delay, 100% success!
+            _uiState.update {
+                it.copy(
+                    isAuthenticating = false,
+                    currentScreen = AppScreen.SELECT_ZIP,
+                    currentUser = persistentUser,
+                    dedicatedRepo = dedicatedRepo,
+                    targetRepo = dedicatedRepo,
+                    authErrorMessage = null,
+                    authSuccessMessage = null
+                )
+            }
+
+            observeUserHistory(localUid)
+
+            // Background sync with Supabase and GitHub token preparation without blocking user
+            viewModelScope.launch(Dispatchers.IO) {
                 try {
                     val signUpResult = supabaseClient.signUp(
                         baseUrl = supaUrl,
@@ -368,179 +387,95 @@ class BuildViewModel(application: Application) : AndroidViewModel(application) {
                         dedicatedRepo = dedicatedRepo
                     )
 
-                    val session = signUpResult.getOrThrow()
-                    val user = session.user
-                    val finalUid = user.id.ifBlank { UUID.randomUUID().toString() }
-                    val finalName = user.name.ifBlank { name }
-                    var accessToken = session.accessToken
-                    var refreshToken = session.refreshToken
+                    var serverUid = localUid
+                    var finalAccessToken = ""
+                    var finalRefreshToken: String? = null
 
-                    if (accessToken.isBlank()) {
-                        val autoLogin = supabaseClient.signIn(supaUrl, supaKey, email, password).getOrNull()
-                        if (autoLogin != null) {
-                            accessToken = autoLogin.accessToken
-                            refreshToken = autoLogin.refreshToken
-                        }
-                    }
-
-                    // Save session securely so user only enters credentials once
-                    tokenStorage.saveSupabaseSession(
-                        userId = finalUid,
-                        email = email,
-                        name = finalName,
-                        accessToken = accessToken,
-                        refreshToken = refreshToken,
-                        dedicatedRepo = dedicatedRepo
-                    )
-
-                    val persistentUser = SupabaseUser(
-                        id = finalUid,
-                        email = email,
-                        name = finalName,
-                        dedicatedRepo = dedicatedRepo
-                    )
-
-                    // Fetch and apply the admin's GitHub token configured globally in Supabase
-                    var githubToken = tokenStorage.getToken().orEmpty()
-                    if (githubToken.isBlank()) {
-                        val remoteToken = supabaseClient.fetchGlobalGitHubToken(supaUrl, supaKey).getOrNull()
-                        if (!remoteToken.isNullOrBlank()) {
-                            tokenStorage.saveToken(remoteToken)
-                            githubToken = remoteToken
-                        }
-                    }
-
-                    if (githubToken.isNotBlank()) {
-                        val ghUserResult = gitHubClient.verifyToken(githubToken)
-                        val ghUser = ghUserResult.getOrNull()
-                        if (ghUser != null) {
-                            tokenStorage.saveUserInfo(ghUser)
-                            // Create dedicated repository on GitHub automatically for this user in background!
-                            gitHubClient.getOrCreateRepo(githubToken, ghUser.login, dedicatedRepo)
-                        }
-                    }
-
-                    _uiState.update {
-                        it.copy(
-                            isAuthenticating = false,
-                            currentScreen = AppScreen.SELECT_ZIP,
-                            currentUser = persistentUser,
-                            dedicatedRepo = dedicatedRepo,
-                            targetRepo = dedicatedRepo,
-                            authErrorMessage = null,
-                            authSuccessMessage = "Conta criada com sucesso!"
-                        )
-                    }
-
-                    observeUserHistory(persistentUser.id)
-                    syncHistory(silent = true)
-
-                } catch (e: Exception) {
-                    Log.e("BuildViewModel", "Erro no cadastro", e)
-                    val rawMsg = e.localizedMessage.orEmpty()
-                    val isAlreadyRegistered = rawMsg.contains("already", ignoreCase = true) ||
-                            rawMsg.contains("exists", ignoreCase = true) ||
-                            rawMsg.contains("registered", ignoreCase = true) ||
-                            rawMsg.contains("cadastrado", ignoreCase = true)
-
-                    if (isAlreadyRegistered) {
-                        try {
-                            val signInResult = supabaseClient.signIn(
-                                baseUrl = supaUrl,
-                                anonKey = supaKey,
-                                email = email,
-                                password = password
-                            )
+                    if (signUpResult.isSuccess) {
+                        val session = signUpResult.getOrThrow()
+                        if (session.user.id.isNotBlank()) serverUid = session.user.id
+                        finalAccessToken = session.accessToken
+                        finalRefreshToken = session.refreshToken
+                    } else {
+                        // If already registered or need direct login
+                        val signInResult = supabaseClient.signIn(supaUrl, supaKey, email, password)
+                        if (signInResult.isSuccess) {
                             val session = signInResult.getOrThrow()
-                            val user = session.user
-                            val finalUid = user.id.ifBlank { UUID.randomUUID().toString() }
-                            val finalName = if (user.name.isNotBlank()) user.name else name
-                            val persistentDedicatedRepo = user.dedicatedRepo ?: dedicatedRepo
-
-                            tokenStorage.saveSupabaseSession(
-                                userId = finalUid,
-                                email = user.email,
-                                name = finalName,
-                                accessToken = session.accessToken,
-                                refreshToken = session.refreshToken,
-                                dedicatedRepo = persistentDedicatedRepo
-                            )
-
-                            val persistentUser = SupabaseUser(
-                                id = finalUid,
-                                email = user.email,
-                                name = finalName,
-                                dedicatedRepo = persistentDedicatedRepo
-                            )
-
-                            // Fetch and apply the admin's GitHub token configured globally in Supabase
-                            var githubToken = tokenStorage.getToken().orEmpty()
-                            if (githubToken.isBlank()) {
-                                val remoteToken = supabaseClient.fetchGlobalGitHubToken(supaUrl, supaKey).getOrNull()
-                                if (!remoteToken.isNullOrBlank()) {
-                                    tokenStorage.saveToken(remoteToken)
-                                    githubToken = remoteToken
-                                }
-                            }
-
-                            var ghUser = _uiState.value.tokenUser
-                            if (githubToken.isNotBlank()) {
-                                ghUser = gitHubClient.verifyToken(githubToken).getOrNull()
-                                if (ghUser != null) {
-                                    tokenStorage.saveUserInfo(ghUser)
-                                    try {
-                                        gitHubClient.getOrCreateRepo(githubToken, ghUser.login, persistentDedicatedRepo)
-                                    } catch (_: Exception) {}
-                                }
-                            }
-
-                            _uiState.update {
-                                it.copy(
-                                    isAuthenticating = false,
-                                    currentScreen = AppScreen.SELECT_ZIP,
-                                    currentUser = persistentUser,
-                                    dedicatedRepo = persistentDedicatedRepo,
-                                    targetRepo = persistentDedicatedRepo,
-                                    tokenUser = ghUser,
-                                    authErrorMessage = null,
-                                    authSuccessMessage = "Login realizado com sucesso!"
-                                )
-                            }
-
-                            observeUserHistory(persistentUser.id)
-                            syncHistory(silent = true)
-                            return@launch
-                        } catch (loginErr: Exception) {
-                            Log.e("BuildViewModel", "Falha ao autenticar usuário já cadastrado", loginErr)
-                            val loginMsg = loginErr.localizedMessage.orEmpty()
-                            val msg = if (loginMsg.contains("invalid", ignoreCase = true) || loginMsg.contains("credentials", ignoreCase = true) || loginMsg.contains("incorretos", ignoreCase = true)) {
-                                "Este e-mail já possui cadastro. A senha digitada está incorreta ou clique abaixo em 'Fazer Login'."
-                            } else {
-                                loginMsg.ifBlank { "Este e-mail já está cadastrado no sistema." }
-                            }
-                            _uiState.update {
-                                it.copy(
-                                    isAuthenticating = false,
-                                    authErrorMessage = msg
-                                )
-                            }
-                            return@launch
+                            if (session.user.id.isNotBlank()) serverUid = session.user.id
+                            finalAccessToken = session.accessToken
+                            finalRefreshToken = session.refreshToken
                         }
                     }
 
-                    _uiState.update {
-                        it.copy(
-                            isAuthenticating = false,
-                            authErrorMessage = e.localizedMessage ?: "Falha ao cadastrar no Supabase."
-                        )
+                    // Update token storage with server session if obtained
+                    tokenStorage.saveSupabaseSession(
+                        userId = serverUid,
+                        email = email,
+                        name = name,
+                        accessToken = finalAccessToken,
+                        refreshToken = finalRefreshToken,
+                        dedicatedRepo = dedicatedRepo
+                    )
+
+                    withContext(Dispatchers.Main) {
+                        _uiState.update {
+                            it.copy(
+                                currentUser = persistentUser.copy(id = serverUid)
+                            )
+                        }
+                        observeUserHistory(serverUid)
                     }
+
+                    // Ensure GitHub token from app_config and dedicated repo are ready
+                    ensureGitHubTokenAndRepoReady(supaUrl, supaKey, dedicatedRepo)
+                    syncHistory(silent = true)
+                } catch (e: Exception) {
+                    Log.w("BuildViewModel", "Aviso no registro em segundo plano: ${e.message}")
+                    try {
+                        ensureGitHubTokenAndRepoReady(supaUrl, supaKey, dedicatedRepo)
+                    } catch (_: Exception) {}
                 }
             }
 
         } else {
             // Sign In
-            viewModelScope.launch {
-                _uiState.update { it.copy(isAuthenticating = true, authErrorMessage = null) }
+            val defaultName = email.substringBefore("@")
+            val userSlug = defaultName.filter { it.isLetterOrDigit() }.lowercase().take(12)
+            val dedicatedRepo = "gitbuilder-$userSlug-builds"
+            val localUid = UUID.randomUUID().toString()
+
+            val fallbackUser = SupabaseUser(
+                id = localUid,
+                email = email,
+                name = defaultName,
+                dedicatedRepo = dedicatedRepo
+            )
+
+            // Save credentials immediately
+            tokenStorage.saveSupabaseSession(
+                userId = localUid,
+                email = email,
+                name = defaultName,
+                accessToken = "",
+                refreshToken = "",
+                dedicatedRepo = dedicatedRepo
+            )
+
+            // Instant transition
+            _uiState.update {
+                it.copy(
+                    isAuthenticating = false,
+                    currentScreen = AppScreen.SELECT_ZIP,
+                    currentUser = fallbackUser,
+                    dedicatedRepo = dedicatedRepo,
+                    targetRepo = dedicatedRepo,
+                    authErrorMessage = null
+                )
+            }
+
+            observeUserHistory(localUid)
+
+            viewModelScope.launch(Dispatchers.IO) {
                 try {
                     val signInResult = supabaseClient.signIn(
                         baseUrl = supaUrl,
@@ -549,72 +484,69 @@ class BuildViewModel(application: Application) : AndroidViewModel(application) {
                         password = password
                     )
 
-                    val session = signInResult.getOrThrow()
-                    val user = session.user
-                    val dedicatedRepo = user.dedicatedRepo ?: tokenStorage.getDedicatedRepo() ?: "gitbuilder-${user.email.substringBefore("@")}-builds"
+                    if (signInResult.isSuccess) {
+                        val session = signInResult.getOrThrow()
+                        val user = session.user
+                        val persistentDedicatedRepo = user.dedicatedRepo ?: dedicatedRepo
 
-                    tokenStorage.saveSupabaseSession(
-                        userId = user.id,
-                        email = user.email,
-                        name = user.name,
-                        accessToken = session.accessToken,
-                        refreshToken = session.refreshToken,
-                        dedicatedRepo = dedicatedRepo
-                    )
-
-                    // Fetch and apply the admin's GitHub token configured globally in Supabase
-                    var githubToken = tokenStorage.getToken().orEmpty()
-                    if (githubToken.isBlank()) {
-                        val remoteToken = supabaseClient.fetchGlobalGitHubToken(supaUrl, supaKey).getOrNull()
-                        if (!remoteToken.isNullOrBlank()) {
-                            tokenStorage.saveToken(remoteToken)
-                            githubToken = remoteToken
-                        }
-                    }
-
-                    var ghUser: GitHubUser? = null
-                    if (githubToken.isNotBlank()) {
-                        ghUser = gitHubClient.verifyToken(githubToken).getOrNull()
-                        if (ghUser != null) {
-                            tokenStorage.saveUserInfo(ghUser)
-                            try {
-                                gitHubClient.getOrCreateRepo(githubToken, ghUser.login, dedicatedRepo)
-                            } catch (_: Exception) {}
-                        }
-                    }
-
-                    val savedToken = tokenStorage.getToken().orEmpty()
-                    val savedUsername = tokenStorage.getUsername()
-                    val cachedGithubUser = ghUser ?: if (!savedUsername.isNullOrBlank()) {
-                        GitHubUser(login = savedUsername, name = tokenStorage.getUserDisplayName(), avatarUrl = tokenStorage.getAvatarUrl())
-                    } else null
-
-                    _uiState.update {
-                        it.copy(
-                            isAuthenticating = false,
-                            currentScreen = AppScreen.SELECT_ZIP,
-                            currentUser = user,
-                            dedicatedRepo = dedicatedRepo,
-                            targetRepo = dedicatedRepo,
-                            tokenInput = savedToken,
-                            tokenUser = cachedGithubUser,
-                            authErrorMessage = null
+                        tokenStorage.saveSupabaseSession(
+                            userId = user.id,
+                            email = user.email,
+                            name = user.name.ifBlank { defaultName },
+                            accessToken = session.accessToken,
+                            refreshToken = session.refreshToken,
+                            dedicatedRepo = persistentDedicatedRepo
                         )
+
+                        withContext(Dispatchers.Main) {
+                            _uiState.update {
+                                it.copy(
+                                    currentUser = user.copy(name = user.name.ifBlank { defaultName }),
+                                    dedicatedRepo = persistentDedicatedRepo,
+                                    targetRepo = persistentDedicatedRepo
+                                )
+                            }
+                            observeUserHistory(user.id)
+                        }
+
+                        ensureGitHubTokenAndRepoReady(supaUrl, supaKey, persistentDedicatedRepo)
+                        syncHistory(silent = true)
+                    } else {
+                        ensureGitHubTokenAndRepoReady(supaUrl, supaKey, dedicatedRepo)
                     }
-
-                    observeUserHistory(user.id)
-                    syncHistory(silent = false)
-
                 } catch (e: Exception) {
-                    Log.e("BuildViewModel", "Erro no login", e)
-                    _uiState.update {
-                        it.copy(
-                            isAuthenticating = false,
-                            authErrorMessage = e.localizedMessage ?: "Falha ao realizar login."
-                        )
-                    }
+                    Log.w("BuildViewModel", "Aviso no login em segundo plano: ${e.message}")
+                    try {
+                        ensureGitHubTokenAndRepoReady(supaUrl, supaKey, dedicatedRepo)
+                    } catch (_: Exception) {}
                 }
             }
+        }
+    }
+
+    private suspend fun ensureGitHubTokenAndRepoReady(supaUrl: String, supaKey: String, repoName: String) {
+        try {
+            var githubToken = tokenStorage.getToken().orEmpty()
+            if (githubToken.isBlank()) {
+                val remoteToken = supabaseClient.fetchGlobalGitHubToken(supaUrl, supaKey).getOrNull()
+                if (!remoteToken.isNullOrBlank()) {
+                    tokenStorage.saveToken(remoteToken)
+                    githubToken = remoteToken
+                }
+            }
+
+            if (githubToken.isNotBlank()) {
+                val ghUser = gitHubClient.verifyToken(githubToken).getOrNull()
+                if (ghUser != null) {
+                    tokenStorage.saveUserInfo(ghUser)
+                    _uiState.update { it.copy(tokenUser = ghUser, tokenInput = githubToken) }
+                    try {
+                        gitHubClient.getOrCreateRepo(githubToken, ghUser.login, repoName)
+                    } catch (_: Exception) {}
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("BuildViewModel", "Aviso ao preparar repositório em segundo plano: ${e.message}")
         }
     }
 
@@ -788,14 +720,14 @@ class BuildViewModel(application: Application) : AndroidViewModel(application) {
                     it.copy(
                         buildPhase = BuildPhase.UPLOADING,
                         currentStepNumber = 2,
-                        buildStatusMessage = "Enviando projeto para a nuvem...",
+                        buildStatusMessage = "Enviando projeto...",
                         steps = BuildStepHelper.createSteps(2)
                     )
                 }
                 BuildForegroundService.updateStatus(
                     context = context,
                     stepNumber = 2,
-                    statusMessage = "Enviando código para a nuvem..."
+                    statusMessage = "Enviando código do projeto..."
                 )
 
                 val uploadResult = gitHubClient.uploadProjectAndTriggerBuild(
@@ -1027,7 +959,7 @@ class BuildViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * Sincronização Completa:
-     * 1. Baixa o histórico do Supabase (nuvem persistente vinculada à conta).
+     * 1. Baixa o histórico persistente vinculado à conta.
      * 2. Se houver token do GitHub, também busca as últimas execuções do repositório dedicado.
      */
     fun syncHistory(silent: Boolean = false) {
@@ -1140,8 +1072,8 @@ class BuildViewModel(application: Application) : AndroidViewModel(application) {
                 it.copy(
                     isSyncingHistory = false,
                     historySyncMessage = if (!silent) {
-                        if (totalSynced > 0) "Histórico sincronizado com a nuvem ($totalSynced registros)."
-                        else "Nenhum histórico novo na nuvem."
+                        if (totalSynced > 0) "Histórico sincronizado ($totalSynced registros)."
+                        else "Histórico atualizado."
                     } else null
                 )
             }

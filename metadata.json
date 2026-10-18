@@ -1,6 +1,6 @@
 {
   "name": "GitBuilder",
-  "description": "Compilador de APKs Android em nuvem via GitHub Actions",
+  "description": "Compilador de APKs Android",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

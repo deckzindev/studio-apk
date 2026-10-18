@@ -445,7 +445,7 @@ private fun HistoryCard(
             Spacer(modifier = Modifier.height(4.dp))
 
             Text(
-                text = "$dateFormatted • Nuvem",
+                text = dateFormatted,
                 style = MaterialTheme.typography.bodySmall,
                 color = TextSecondary,
                 fontSize = 11.sp

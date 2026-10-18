@@ -53,7 +53,7 @@ object BuildStepHelper {
             ),
             SimpleBuildStep(
                 stepNumber = 2,
-                title = "Envio para a Nuvem",
+                title = "Envio do Projeto",
                 description = "Transferindo arquivos com segurança",
                 state = step2State
             ),

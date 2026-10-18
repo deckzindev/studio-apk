@@ -124,7 +124,7 @@ fun AuthCleanScreen(
             Spacer(modifier = Modifier.height(16.dp))
 
             Text(
-                text = if (state.isSignUpMode) "Criar Conta Obrigatória" else "Entrar na sua Conta",
+                text = if (state.isSignUpMode) "Criar Conta" else "Entrar",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
                 color = TextPrimary
@@ -134,9 +134,9 @@ fun AuthCleanScreen(
 
             Text(
                 text = if (state.isSignUpMode)
-                    "Crie sua conta para compilar seus projetos Android e manter seu histórico seguro na nuvem."
+                    "Informe seu nome, e-mail e senha"
                 else
-                    "Acesse suas compilações e APKs anteriores de qualquer dispositivo.",
+                    "Informe seu e-mail e senha para continuar",
                 style = MaterialTheme.typography.bodySmall,
                 color = TextSecondary,
                 modifier = Modifier.padding(horizontal = 8.dp),
@@ -215,9 +215,9 @@ fun AuthCleanScreen(
                 visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Password,
-                    imeAction = if (state.isSignUpMode) ImeAction.Next else ImeAction.Done
+                    imeAction = ImeAction.Done
                 ),
-                keyboardActions = KeyboardActions(onDone = { if (!state.isSignUpMode) onSubmitAuth() }),
+                keyboardActions = KeyboardActions(onDone = { onSubmitAuth() }),
                 leadingIcon = {
                     Icon(imageVector = Icons.Default.Lock, contentDescription = null, tint = AccentCyan)
                 },
@@ -243,48 +243,6 @@ fun AuthCleanScreen(
                     focusedLabelColor = AccentCyan
                 )
             )
-
-            if (state.isSignUpMode) {
-                Spacer(modifier = Modifier.height(12.dp))
-
-                OutlinedTextField(
-                    value = state.authConfirmPasswordInput,
-                    onValueChange = onConfirmPasswordChanged,
-                    label = { Text("Confirmar Senha") },
-                    placeholder = { Text("Repita sua senha", color = TextMuted) },
-                    singleLine = true,
-                    visualTransformation = if (confirmPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Password,
-                        imeAction = ImeAction.Done
-                    ),
-                    keyboardActions = KeyboardActions(onDone = { onSubmitAuth() }),
-                    leadingIcon = {
-                        Icon(imageVector = Icons.Default.Lock, contentDescription = null, tint = AccentCyan)
-                    },
-                    trailingIcon = {
-                        IconButton(onClick = { confirmPasswordVisible = !confirmPasswordVisible }) {
-                            Icon(
-                                imageVector = if (confirmPasswordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                contentDescription = null,
-                                tint = TextSecondary
-                            )
-                        }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("auth_confirm_password_input"),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = AccentCyan,
-                        unfocusedBorderColor = TerminalCardBorder,
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary,
-                        cursorColor = AccentCyan,
-                        focusedLabelColor = AccentCyan
-                    )
-                )
-            }
 
             // Error & Success feedback
             AnimatedVisibility(visible = state.authErrorMessage != null) {
@@ -350,7 +308,7 @@ fun AuthCleanScreen(
                     )
                 } else {
                     Text(
-                        text = if (state.isSignUpMode) "Criar Conta & Ativar Nuvem" else "Entrar na Conta",
+                        text = if (state.isSignUpMode) "Criar Conta" else "Entrar",
                         fontWeight = FontWeight.Bold,
                         fontSize = 16.sp
                     )
@@ -366,9 +324,9 @@ fun AuthCleanScreen(
             ) {
                 Text(
                     text = if (state.isSignUpMode)
-                        "Já possui uma conta? Fazer Login"
+                        "Já possui uma conta? Entrar"
                     else
-                        "Não tem uma conta? Cadastre-se aqui",
+                        "Criar nova conta",
                     color = AccentCyan,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold
@@ -433,13 +391,6 @@ fun SelectZipCleanScreen(
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Bold,
                             color = TextPrimary,
-                            maxLines = 1
-                        )
-                        Text(
-                            text = "Nuvem de Compilação Conectada",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = AccentCyan,
-                            fontSize = 11.sp,
                             maxLines = 1
                         )
                     }
@@ -539,33 +490,7 @@ fun SelectZipCleanScreen(
                             fontWeight = FontWeight.Bold
                         )
                     }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Text(
-                        text = "O projeto é compilado na nuvem e o APK fica disponível permanentemente na sua conta.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextMuted,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
                 }
-            }
-
-            // Bottom metadata
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .padding(bottom = 16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(
-                    text = "Conta: ${state.currentUser?.email ?: "Sincronizado"}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextSecondary,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 11.sp
-                )
             }
         }
     }
@@ -859,7 +784,7 @@ fun BuildProgressCleanScreen(
                         Text(
                             text = when (activeStepNumber) {
                                 1 -> "Preparando Projeto"
-                                2 -> "Enviando para a Nuvem"
+                                2 -> "Enviando Projeto"
                                 else -> "Compilando Aplicativo"
                             },
                             style = MaterialTheme.typography.headlineSmall,
@@ -873,8 +798,8 @@ fun BuildProgressCleanScreen(
                             text = state.buildStatusMessage.ifBlank {
                                 when (activeStepNumber) {
                                     1 -> "Lendo arquivos do aplicativo..."
-                                    2 -> "Transferindo código para o servidor..."
-                                    else -> "O GitHub Actions está gerando o APK..."
+                                    2 -> "Transferindo código do projeto..."
+                                    else -> "Gerando o arquivo APK..."
                                 }
                             },
                             style = MaterialTheme.typography.bodyMedium,

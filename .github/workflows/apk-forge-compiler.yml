@@ -1,4 +1,4 @@
-name: Android Builder (GitBuilder)
+name: Android Builder (Studio APK)
 
 on:
   push:

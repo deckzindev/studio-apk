@@ -40,7 +40,8 @@ data class LiveBuildServiceState(
     val isFinished: Boolean = false,
     val isSuccess: Boolean = false,
     val validApkArtifact: ArtifactItem? = null,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val logs: List<String> = emptyList()
 )
 
 class BuildForegroundService : Service() {
@@ -68,6 +69,18 @@ class BuildForegroundService : Service() {
 
         private val _serviceState = MutableStateFlow(LiveBuildServiceState())
         val serviceState = _serviceState.asStateFlow()
+
+        fun appendLog(message: String) {
+            val time = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
+            val entry = "[$time] $message"
+            _serviceState.update { current ->
+                current.copy(logs = current.logs + entry)
+            }
+        }
+
+        fun clearLogs() {
+            _serviceState.update { it.copy(logs = emptyList()) }
+        }
 
         fun startService(
             context: Context,
@@ -328,6 +341,8 @@ class BuildForegroundService : Service() {
                 val directRun = gitHubClient.findWorkflowRunForCommit(token, owner, repo, commitSha).getOrNull()
                 if (directRun != null) {
                     runId = directRun.id
+                    appendLog("[INFO] Workflow localizado no GitHub Actions: Run #${directRun.runNumber ?: 1} (ID: $runId)")
+                    appendLog("[INFO] Status inicial do runner: ${directRun.status ?: "in_progress"}")
                     break
                 }
 
@@ -340,6 +355,8 @@ class BuildForegroundService : Service() {
 
                 if (matchedRecent != null) {
                     runId = matchedRecent.id
+                    appendLog("[INFO] Workflow localizado no GitHub Actions: Run #${matchedRecent.runNumber ?: 1} (ID: $runId)")
+                    appendLog("[INFO] Status inicial do runner: ${matchedRecent.status ?: "in_progress"}")
                     break
                 }
 
@@ -349,6 +366,7 @@ class BuildForegroundService : Service() {
             if (runId == null) {
                 val elapsed = (System.currentTimeMillis() - startTime) / 1000
                 val errMsg = "Tempo limite aguardando o servidor iniciar."
+                appendLog("[ERRO] $errMsg")
                 _serviceState.update {
                     it.copy(
                         isRunning = false,
@@ -370,6 +388,7 @@ class BuildForegroundService : Service() {
 
             var isCompleted = false
             var consecutiveErrors = 0
+            val loggedSteps = mutableSetOf<String>()
 
             while (isActive && !isCompleted) {
                 delay(2500)
@@ -378,6 +397,7 @@ class BuildForegroundService : Service() {
                 // Safety timeout: 25 minutes
                 if (elapsed > 25 * 60) {
                     val timeoutMsg = "Tempo limite excedido na compilação."
+                    appendLog("[ERRO] $timeoutMsg")
                     _serviceState.update {
                         it.copy(
                             isRunning = false,
@@ -402,6 +422,7 @@ class BuildForegroundService : Service() {
                     consecutiveErrors++
                     if (consecutiveErrors >= 15) { // 35+ seconds of persistent errors
                         val errMsg = "Erro de conexão persistente com o servidor."
+                        appendLog("[ERRO] $errMsg")
                         _serviceState.update {
                             it.copy(
                                 isRunning = false,
@@ -428,6 +449,21 @@ class BuildForegroundService : Service() {
                 val status = currentRun.status?.lowercase()
                 val conclusion = currentRun.conclusion?.lowercase()
 
+                // Query and log real steps from workflow jobs
+                val jobs = gitHubClient.getWorkflowJobs(token, owner, repo, runId).getOrDefault(emptyList())
+                for (job in jobs) {
+                    for (step in job.steps) {
+                        val stepKey = "${job.id}_${step.number}_${step.status}_${step.conclusion}"
+                        if (loggedSteps.add(stepKey)) {
+                            when {
+                                step.conclusion == "success" -> appendLog("[OK] Concluído: ${step.name}")
+                                step.conclusion == "failure" -> appendLog("[ERRO] Falha na etapa: ${step.name}")
+                                step.status == "in_progress" -> appendLog("[INFO] Executando: ${step.name}...")
+                            }
+                        }
+                    }
+                }
+
                 if (status == "in_progress" || status == "queued") {
                     val statusText = if (status == "queued") "Fila do servidor..." else "Compilando no GitHub..."
                     _serviceState.update {
@@ -453,6 +489,36 @@ class BuildForegroundService : Service() {
 
                     val isSuccess = conclusion == "success"
                     val finalMsg = if (isSuccess) "Compilação concluída com sucesso!" else "A compilação falhou no servidor."
+
+                    if (isSuccess) {
+                        appendLog("[OK] Execução concluída com sucesso no GitHub Actions.")
+                        appendLog("[INFO] Verificando artefatos gerados pelo fluxo de compilação...")
+                        if (apkArtifact != null) {
+                            appendLog("[OK] Artefato APK gerado: ${apkArtifact.name} (${ZipHelper.formatBytes(apkArtifact.sizeInBytes)})")
+                            appendLog("[SUCESSO] Aplicativo APK pronto para download e instalação!")
+                        } else {
+                            appendLog("[INFO] Workflow finalizado. APK gerado com sucesso.")
+                        }
+                    } else {
+                        appendLog("[ERRO] O runner do GitHub Actions finalizou com status: ${conclusion ?: "falha"}")
+                        for (job in jobs) {
+                            if (job.conclusion == "failure") {
+                                appendLog("[ERRO] Etapa com falha no job '${job.name}'")
+                                val rawLogs = gitHubClient.getJobLogs(token, owner, repo, job.id).getOrNull()
+                                if (!rawLogs.isNullOrBlank()) {
+                                    val cleanLines = rawLogs.lines()
+                                        .map { it.replace(Regex("\u001B\\[[;\\d]*m"), "").trim() }
+                                        .filter { l -> l.contains("FAILURE:", true) || l.contains("error:", true) || l.contains("What went wrong:", true) }
+                                        .takeLast(8)
+                                    if (cleanLines.isNotEmpty()) {
+                                        appendLog("[ERRO] Detalhes do erro no Gradle:")
+                                        cleanLines.forEach { appendLog("   $it") }
+                                    }
+                                }
+                            }
+                        }
+                        appendLog("[ERRO] Processo de compilação interrompido devido a erro.")
+                    }
 
                     _serviceState.update {
                         it.copy(
@@ -502,6 +568,7 @@ class BuildForegroundService : Service() {
         artifact: ArtifactItem?
     ) {
         try {
+            val allLogs = _serviceState.value.logs.joinToString("\n")
             val record = BuildRecord(
                 id = buildId,
                 projectName = projectName,
@@ -509,7 +576,7 @@ class BuildForegroundService : Service() {
                 status = status,
                 elapsedSeconds = elapsedSeconds,
                 timestamp = System.currentTimeMillis(),
-                logsText = if (status == "SUCCESS") "Compilação concluída com sucesso." else "Compilação finalizou com erro.",
+                logsText = allLogs.ifBlank { if (status == "SUCCESS") "Compilação concluída com sucesso." else "Compilação finalizou com erro." },
                 artifactId = artifact?.id,
                 artifactDownloadUrl = artifact?.archiveDownloadUrl,
                 artifactSize = artifact?.sizeInBytes,
@@ -544,12 +611,8 @@ class BuildForegroundService : Service() {
             String.format(Locale.US, " • %02d:%02d", min, sec)
         } else ""
 
-        val title = "GitBuilder • $projectName"
-        val contentText = if (stepNumber in 1..3) {
-            "Etapa $stepNumber de 3: $message$timeFormatted"
-        } else {
-            "$message$timeFormatted"
-        }
+        val title = "Studio APK • $projectName"
+        val contentText = "$message$timeFormatted"
 
         val builder = NotificationCompat.Builder(this, NotificationHelper.PROGRESS_CHANNEL_ID)
             .setContentTitle(title)

@@ -45,7 +45,7 @@ object ApkHelper {
         }
     }
 
-    fun copyToClipboard(context: Context, text: String, label: String = "GitBuilder Logs") {
+    fun copyToClipboard(context: Context, text: String, label: String = "Studio APK Logs") {
         try {
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             val clip = ClipData.newPlainText(label, text)

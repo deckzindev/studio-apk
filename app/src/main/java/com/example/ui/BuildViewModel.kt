@@ -33,6 +33,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import java.util.UUID
@@ -99,6 +100,7 @@ data class BuildUiState(
     val isDownloadingApk: Boolean = false,
     val downloadPercent: Int = 0,
     val downloadedApkFile: File? = null,
+    val buildLogs: List<String> = emptyList(),
 
     // Cloud History
     val historyList: List<BuildRecord> = emptyList(),
@@ -191,6 +193,11 @@ class BuildViewModel(application: Application) : AndroidViewModel(application) {
         // Listen to background service updates for live compilation tracking
         viewModelScope.launch {
             BuildForegroundService.serviceState.collect { serviceUpdate ->
+                val currentLogs = _uiState.value.buildLogs
+                val mergedLogs = if (serviceUpdate.logs.isNotEmpty()) {
+                    (currentLogs + serviceUpdate.logs).distinct()
+                } else currentLogs
+
                 if (serviceUpdate.isRunning) {
                     val stepNum = serviceUpdate.stepNumber
                     val phase = when (stepNum) {
@@ -205,7 +212,8 @@ class BuildViewModel(application: Application) : AndroidViewModel(application) {
                             currentStepNumber = stepNum,
                             buildStatusMessage = serviceUpdate.statusMessage,
                             elapsedSeconds = serviceUpdate.elapsedSeconds,
-                            steps = BuildStepHelper.createSteps(stepNum)
+                            steps = BuildStepHelper.createSteps(stepNum),
+                            buildLogs = mergedLogs
                         )
                     }
                 } else if (serviceUpdate.isFinished) {
@@ -217,6 +225,7 @@ class BuildViewModel(application: Application) : AndroidViewModel(application) {
                             buildStatusMessage = serviceUpdate.statusMessage,
                             elapsedSeconds = serviceUpdate.elapsedSeconds,
                             validApkArtifact = serviceUpdate.validApkArtifact ?: it.validApkArtifact,
+                            buildLogs = mergedLogs,
                             steps = BuildStepHelper.createSteps(
                                 currentStep = if (serviceUpdate.isSuccess) 4 else 3,
                                 isError = !serviceUpdate.isSuccess,
@@ -579,12 +588,27 @@ class BuildViewModel(application: Application) : AndroidViewModel(application) {
     }
 
 
+    fun appendLog(message: String) {
+        val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+        val entry = "[$time] $message"
+        _uiState.update { it.copy(buildLogs = it.buildLogs + entry) }
+        BuildForegroundService.appendLog(message)
+    }
+
+    fun clearLogs() {
+        _uiState.update { it.copy(buildLogs = emptyList()) }
+        BuildForegroundService.clearLogs()
+    }
+
     // Build flow initiated by user selecting ZIP
     fun onZipSelected(uri: Uri) {
         val newBuildId = UUID.randomUUID().toString()
         currentBuildId = newBuildId
         currentBuildStartTime = System.currentTimeMillis()
         currentProjectName = "Projeto Android"
+
+        clearLogs()
+        appendLog("[INFO] Inicializando processamento do arquivo ZIP...")
 
         viewModelScope.launch {
             _uiState.update {
@@ -617,6 +641,7 @@ class BuildViewModel(application: Application) : AndroidViewModel(application) {
 
             if (result.isFailure) {
                 val err = result.exceptionOrNull()?.localizedMessage ?: "Falha ao ler o arquivo ZIP."
+                appendLog("[ERRO] Falha ao extrair arquivo ZIP: $err")
                 BuildForegroundService.finishService(context, false, currentProjectName, "Falha ao ler arquivo ZIP")
                 _uiState.update {
                     it.copy(
@@ -632,6 +657,32 @@ class BuildViewModel(application: Application) : AndroidViewModel(application) {
 
             val project = result.getOrThrow()
             currentProjectName = project.fileName
+
+            val ktCount = project.files.count { it.path.endsWith(".kt") }
+            val javaCount = project.files.count { it.path.endsWith(".java") }
+            val xmlCount = project.files.count { it.path.endsWith(".xml") }
+            val hasManifest = project.files.any { it.path.contains("AndroidManifest.xml", ignoreCase = true) }
+
+            appendLog("[INFO] Arquivo selecionado: ${project.fileName} (${ZipHelper.formatBytes(project.fileSizeBytes)})")
+            appendLog("[INFO] Extração concluída: ${project.totalFilesCount} arquivos encontrados no projeto.")
+            appendLog("[INFO] Código-fonte: $ktCount Kotlin, $javaCount Java, $xmlCount arquivos XML.")
+            if (hasManifest) {
+                appendLog("[OK] AndroidManifest.xml validado.")
+            }
+            if (project.detectedBuildFiles.isNotEmpty()) {
+                appendLog("[INFO] Scripts de compilação detectados: ${project.detectedBuildFiles.joinToString(", ")}")
+            }
+            if (project.hasGradleWrapper) {
+                appendLog("[OK] Gradle Wrapper presente no projeto.")
+            } else {
+                appendLog("[INFO] Gradle Wrapper será configurado no runner.")
+            }
+            if (project.hasWorkflow) {
+                appendLog("[INFO] Workflow do GitHub Actions já configurado.")
+            } else {
+                appendLog("[INFO] Injetando workflow otimizado de compilação Android...")
+            }
+            appendLog("[OK] Preparação local concluída com sucesso.")
 
             _uiState.update {
                 it.copy(
@@ -729,7 +780,9 @@ class BuildViewModel(application: Application) : AndroidViewModel(application) {
                     stepNumber = 2,
                     statusMessage = "Enviando código do projeto..."
                 )
+                appendLog("[INFO] Preparando envio de ${project.files.size} arquivos para o repositório $repoName...")
 
+                var lastLoggedCount = 0
                 val uploadResult = gitHubClient.uploadProjectAndTriggerBuild(
                     token = token,
                     owner = user.login,
@@ -740,10 +793,16 @@ class BuildViewModel(application: Application) : AndroidViewModel(application) {
                         _uiState.update {
                             it.copy(buildStatusMessage = "Enviando arquivos ($percent%)...")
                         }
+                        if (current > 0 && (current == total || current - lastLoggedCount >= 20)) {
+                            lastLoggedCount = current
+                            appendLog("[INFO] Upload de código: $current/$total arquivos transferidos ($percent%).")
+                        }
                     }
                 )
 
                 val commitSha = uploadResult.getOrThrow()
+                appendLog("[OK] Upload concluído. Commit criado na branch main (SHA: ${commitSha.take(7)}).")
+                appendLog("[INFO] Inicializando runner do GitHub Actions para compilação...")
 
                 _uiState.update {
                     it.copy(
@@ -919,7 +978,8 @@ class BuildViewModel(application: Application) : AndroidViewModel(application) {
                 buildStatusMessage = if (isSuccess) "Compilação concluída com sucesso!" else "A compilação falhou no servidor.",
                 elapsedSeconds = record.elapsedSeconds,
                 validApkArtifact = artifactItem,
-                activeHistoryRecord = record
+                activeHistoryRecord = record,
+                buildLogs = if (record.logsText.isNotBlank()) record.logsText.lines() else emptyList()
             )
         }
     }

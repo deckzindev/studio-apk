@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "GitBuilder"
+rootProject.name = "Studio APK"
 
 include(":app")

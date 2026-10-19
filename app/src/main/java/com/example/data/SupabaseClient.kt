@@ -366,6 +366,34 @@ class SupabaseClient {
     }
 
     /**
+     * Delete an APK file from Supabase Storage bucket `apks`.
+     */
+    suspend fun deleteApkFromStorage(
+        baseUrl: String,
+        anonKey: String,
+        accessToken: String,
+        storageUrl: String
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val rootUrl = cleanUrl(baseUrl)
+            val relativePath = storageUrl.substringAfter("/storage/v1/object/public/apks/", "").ifBlank {
+                storageUrl.substringAfter("/apks/", "")
+            }
+            if (relativePath.isBlank()) return@runCatching
+
+            val deleteUrl = "$rootUrl/storage/v1/object/apks/$relativePath"
+            val request = Request.Builder()
+                .url(deleteUrl)
+                .addHeader("apikey", anonKey.trim())
+                .addHeader("Authorization", "Bearer $accessToken")
+                .delete()
+                .build()
+
+            client.newCall(request).execute().close()
+        }
+    }
+
+    /**
      * Upload an APK file to Supabase Storage bucket `apks`.
      */
     suspend fun uploadApkToStorage(

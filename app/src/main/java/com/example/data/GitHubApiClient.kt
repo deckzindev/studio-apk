@@ -1,6 +1,7 @@
 package com.example.data
 
 import android.util.Base64
+import android.util.Log
 import com.example.util.WorkflowGenerator
 import com.example.util.ZipProjectFile
 import com.squareup.moshi.Moshi
@@ -417,6 +418,80 @@ class GitHubApiClient {
                 }
                 val adapter = moshi.adapter(ArtifactsResponse::class.java)
                 adapter.fromJson(body)?.artifacts ?: emptyList()
+            }
+        }
+    }
+
+    suspend fun deleteArtifact(
+        token: String,
+        owner: String,
+        repo: String,
+        artifactId: Long
+    ): Result<Boolean> = withContext(Dispatchers.IO) {
+        runCatching {
+            val url = "https://api.github.com/repos/$owner/$repo/actions/artifacts/$artifactId"
+            val request = baseRequestBuilder(token, url).delete().build()
+            client.newCall(request).execute().use { response ->
+                response.isSuccessful || response.code == 404
+            }
+        }
+    }
+
+    suspend fun deleteWorkflowRun(
+        token: String,
+        owner: String,
+        repo: String,
+        runId: Long
+    ): Result<Boolean> = withContext(Dispatchers.IO) {
+        runCatching {
+            val url = "https://api.github.com/repos/$owner/$repo/actions/runs/$runId"
+            val request = baseRequestBuilder(token, url).delete().build()
+            client.newCall(request).execute().use { response ->
+                response.isSuccessful || response.code == 404
+            }
+        }
+    }
+
+    suspend fun deleteBuildArtifactsAndRun(
+        token: String,
+        owner: String,
+        repo: String,
+        runId: Long?,
+        artifactId: Long?
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            // 1. Delete explicit artifact if present
+            if (artifactId != null) {
+                try {
+                    deleteArtifact(token, owner, repo, artifactId)
+                } catch (e: Exception) {
+                    Log.w("GitHubApiClient", "Aviso ao excluir artefato $artifactId do GitHub: ${e.message}")
+                }
+            }
+
+            // 2. Resolve runId if null by inspecting recent runs that may contain this artifact
+            var resolvedRunId = runId
+            if (resolvedRunId == null && artifactId != null) {
+                val recentRuns = getRecentWorkflowRuns(token, owner, repo, 25).getOrNull()
+                resolvedRunId = recentRuns?.firstOrNull { run ->
+                    val arts = getArtifacts(token, owner, repo, run.id).getOrDefault(emptyList())
+                    arts.any { it.id == artifactId }
+                }?.id
+            }
+
+            // 3. Delete all artifacts belonging to the run and then the run itself
+            if (resolvedRunId != null) {
+                val runArtifacts = getArtifacts(token, owner, repo, resolvedRunId).getOrDefault(emptyList())
+                for (art in runArtifacts) {
+                    try {
+                        deleteArtifact(token, owner, repo, art.id)
+                    } catch (_: Exception) {}
+                }
+                try {
+                    deleteWorkflowRun(token, owner, repo, resolvedRunId)
+                } catch (e: Exception) {
+                    Log.w("GitHubApiClient", "Aviso ao excluir workflow run $resolvedRunId do GitHub: ${e.message}")
+                }
             }
         }
     }

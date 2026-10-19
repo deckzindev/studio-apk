@@ -78,6 +78,7 @@ fun HistoryCleanScreen(
     BackHandler { onBackClick() }
 
     var showClearDialog by remember { mutableStateOf(false) }
+    var recordToDelete by remember { mutableStateOf<BuildRecord?>(null) }
 
     LaunchedEffect(state.historySyncMessage) {
         if (state.historySyncMessage != null) {
@@ -86,11 +87,57 @@ fun HistoryCleanScreen(
         }
     }
 
+    if (recordToDelete != null) {
+        val target = recordToDelete!!
+        AlertDialog(
+            onDismissRequest = { recordToDelete = null },
+            title = {
+                Text("Excluir do Histórico e GitHub", color = TextPrimary, fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Text(
+                    text = "Deseja excluir permanentemente \"${target.projectName}\"?\n\nEsta ação apagará o registro local, removerá os dados do servidor e excluirá completamente os artefatos de APK e o fluxo de compilação no GitHub.",
+                    color = TextSecondary,
+                    fontSize = 13.5.sp,
+                    lineHeight = 18.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val id = target.id
+                        recordToDelete = null
+                        onDeleteRecord(id)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentRed)
+                ) {
+                    Text("Excluir de Tudo", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                Button(
+                    onClick = { recordToDelete = null },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent, contentColor = TextMuted)
+                ) {
+                    Text("Cancelar")
+                }
+            },
+            containerColor = TerminalCardBg
+        )
+    }
+
     if (showClearDialog) {
         AlertDialog(
             onDismissRequest = { showClearDialog = false },
-            title = { Text("Limpar Histórico", color = TextPrimary, fontWeight = FontWeight.Bold) },
-            text = { Text("Deseja apagar todos os registros do histórico?", color = TextSecondary) },
+            title = { Text("Limpar Todo o Histórico", color = TextPrimary, fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    text = "Deseja apagar todos os registros do histórico? Todas as compilações e os arquivos APK gerados serão excluídos completamente do GitHub.",
+                    color = TextSecondary,
+                    fontSize = 13.5.sp,
+                    lineHeight = 18.sp
+                )
+            },
             confirmButton = {
                 Button(
                     onClick = {
@@ -99,7 +146,7 @@ fun HistoryCleanScreen(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = AccentRed)
                 ) {
-                    Text("Limpar Tudo", color = Color.White)
+                    Text("Limpar Tudo", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -319,7 +366,7 @@ fun HistoryCleanScreen(
                         HistoryCard(
                             record = item,
                             onClick = { onOpenRecord(item) },
-                            onDelete = { onDeleteRecord(item.id) }
+                            onDelete = { recordToDelete = item }
                         )
                     }
                 }

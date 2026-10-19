@@ -17,5 +17,6 @@ data class BuildRecord(
     val artifactSize: Long? = null,
     val apkFileName: String? = null,
     val userId: String? = null,
-    val cloudStorageUrl: String? = null
+    val cloudStorageUrl: String? = null,
+    val workflowRunId: Long? = null
 )

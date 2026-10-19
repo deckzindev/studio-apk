@@ -409,7 +409,7 @@ class BuildForegroundService : Service() {
                             elapsedSeconds = elapsed
                         )
                     }
-                    saveRecordToDb(buildRepository, buildId, projectName, repo, "FAILURE", elapsed, null)
+                    saveRecordToDb(buildRepository, buildId, projectName, repo, "FAILURE", elapsed, null, runId)
                     NotificationHelper.dismissProgressNotification(applicationContext)
                     ServiceCompat.stopForeground(this@BuildForegroundService, ServiceCompat.STOP_FOREGROUND_REMOVE)
                     NotificationHelper.showCompletionAlert(applicationContext, false, projectName, timeoutMsg)
@@ -433,7 +433,7 @@ class BuildForegroundService : Service() {
                                 elapsedSeconds = elapsed
                             )
                         }
-                        saveRecordToDb(buildRepository, buildId, projectName, repo, "FAILURE", elapsed, null)
+                        saveRecordToDb(buildRepository, buildId, projectName, repo, "FAILURE", elapsed, null, runId)
                         NotificationHelper.dismissProgressNotification(applicationContext)
                         ServiceCompat.stopForeground(this@BuildForegroundService, ServiceCompat.STOP_FOREGROUND_REMOVE)
                         NotificationHelper.showCompletionAlert(applicationContext, false, projectName, errMsg)
@@ -532,7 +532,7 @@ class BuildForegroundService : Service() {
                         )
                     }
 
-                    saveRecordToDb(buildRepository, buildId, projectName, repo, if (isSuccess) "SUCCESS" else "FAILURE", elapsed, apkArtifact)
+                    saveRecordToDb(buildRepository, buildId, projectName, repo, if (isSuccess) "SUCCESS" else "FAILURE", elapsed, apkArtifact, runId)
 
                     // Immediate, guaranteed cleanup of progress notification
                     NotificationHelper.dismissProgressNotification(applicationContext)
@@ -565,7 +565,8 @@ class BuildForegroundService : Service() {
         repoName: String,
         status: String,
         elapsedSeconds: Long,
-        artifact: ArtifactItem?
+        artifact: ArtifactItem?,
+        workflowRunId: Long? = null
     ) {
         try {
             val allLogs = _serviceState.value.logs.joinToString("\n")
@@ -580,7 +581,8 @@ class BuildForegroundService : Service() {
                 artifactId = artifact?.id,
                 artifactDownloadUrl = artifact?.archiveDownloadUrl,
                 artifactSize = artifact?.sizeInBytes,
-                apkFileName = artifact?.name
+                apkFileName = artifact?.name,
+                workflowRunId = workflowRunId
             )
             repo.saveBuild(record)
         } catch (e: Exception) {

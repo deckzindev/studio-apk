@@ -987,17 +987,47 @@ class BuildViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteHistoryRecord(id: String) {
         viewModelScope.launch {
             try {
+                val record = buildRepository.getBuild(id)
                 buildRepository.deleteBuild(id)
 
-                val supaUrl = tokenStorage.getSupabaseUrl()
-                val supaKey = tokenStorage.getSupabaseAnonKey()
-                val supaToken = tokenStorage.getSupabaseAccessToken()
-                val uid = tokenStorage.getSupabaseUserId()
-                if (supaUrl.isNotBlank() && supaKey.isNotBlank() && !supaToken.isNullOrBlank() && !uid.isNullOrBlank()) {
-                    supabaseClient.deleteBuildRecord(supaUrl, supaKey, supaToken, id, uid)
+                if (record != null) {
+                    val token = tokenStorage.getToken().orEmpty()
+                    val user = _uiState.value.tokenUser ?: tokenStorage.getUsername()?.let {
+                        GitHubUser(login = it, name = tokenStorage.getUserDisplayName(), avatarUrl = tokenStorage.getAvatarUrl())
+                    }
+                    val owner = user?.login ?: tokenStorage.getUsername().orEmpty()
+                    val repo = record.repoName.ifBlank { tokenStorage.getDedicatedRepo() ?: tokenStorage.getTargetRepo() }
+
+                    if (token.isNotBlank() && owner.isNotBlank() && repo.isNotBlank()) {
+                        gitHubClient.deleteBuildArtifactsAndRun(
+                            token = token,
+                            owner = owner,
+                            repo = repo,
+                            runId = record.workflowRunId,
+                            artifactId = record.artifactId
+                        )
+                    }
+
+                    val supaUrl = tokenStorage.getSupabaseUrl()
+                    val supaKey = tokenStorage.getSupabaseAnonKey()
+                    val supaToken = tokenStorage.getSupabaseAccessToken()
+                    val uid = tokenStorage.getSupabaseUserId()
+                    if (supaUrl.isNotBlank() && supaKey.isNotBlank() && !supaToken.isNullOrBlank() && !uid.isNullOrBlank()) {
+                        supabaseClient.deleteBuildRecord(supaUrl, supaKey, supaToken, id, uid)
+                        if (!record.cloudStorageUrl.isNullOrBlank()) {
+                            supabaseClient.deleteApkFromStorage(supaUrl, supaKey, supaToken, record.cloudStorageUrl)
+                        }
+                    }
+                }
+
+                _uiState.update {
+                    it.copy(historySyncMessage = "Registro e arquivos excluídos completamente (incluindo GitHub).")
                 }
             } catch (e: Exception) {
                 Log.e("BuildViewModel", "Erro ao excluir do histórico", e)
+                _uiState.update {
+                    it.copy(historySyncMessage = "Registro removido localmente.")
+                }
             }
         }
     }
@@ -1005,8 +1035,40 @@ class BuildViewModel(application: Application) : AndroidViewModel(application) {
     fun clearAllHistory() {
         viewModelScope.launch {
             try {
+                val allCurrentRecords = _uiState.value.historyList
                 buildRepository.clearHistory()
-                _uiState.update { it.copy(historySyncMessage = "Histórico limpo com sucesso.") }
+
+                val token = tokenStorage.getToken().orEmpty()
+                val user = _uiState.value.tokenUser ?: tokenStorage.getUsername()?.let {
+                    GitHubUser(login = it, name = tokenStorage.getUserDisplayName(), avatarUrl = tokenStorage.getAvatarUrl())
+                }
+                val owner = user?.login ?: tokenStorage.getUsername().orEmpty()
+
+                for (rec in allCurrentRecords) {
+                    val repo = rec.repoName.ifBlank { tokenStorage.getDedicatedRepo() ?: tokenStorage.getTargetRepo() }
+                    if (token.isNotBlank() && owner.isNotBlank() && repo.isNotBlank()) {
+                        gitHubClient.deleteBuildArtifactsAndRun(
+                            token = token,
+                            owner = owner,
+                            repo = repo,
+                            runId = rec.workflowRunId,
+                            artifactId = rec.artifactId
+                        )
+                    }
+
+                    val supaUrl = tokenStorage.getSupabaseUrl()
+                    val supaKey = tokenStorage.getSupabaseAnonKey()
+                    val supaToken = tokenStorage.getSupabaseAccessToken()
+                    val uid = tokenStorage.getSupabaseUserId()
+                    if (supaUrl.isNotBlank() && supaKey.isNotBlank() && !supaToken.isNullOrBlank() && !uid.isNullOrBlank()) {
+                        supabaseClient.deleteBuildRecord(supaUrl, supaKey, supaToken, rec.id, uid)
+                        if (!rec.cloudStorageUrl.isNullOrBlank()) {
+                            supabaseClient.deleteApkFromStorage(supaUrl, supaKey, supaToken, rec.cloudStorageUrl)
+                        }
+                    }
+                }
+
+                _uiState.update { it.copy(historySyncMessage = "Todo o histórico e artefatos foram excluídos (incluindo GitHub).") }
             } catch (e: Exception) {
                 Log.e("BuildViewModel", "Erro ao limpar histórico", e)
             }
